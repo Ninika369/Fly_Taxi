@@ -1,0 +1,16 @@
+server:
+  port: 8081
+spring:
+  application:
+    name: api-passenger
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+        username: nacos
+        password: nacos
+logging:
+  level:
+    com.george.apipassenger.remote: DEBUG  # feign 客户端包路径
+
+

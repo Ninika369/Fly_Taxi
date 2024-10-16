@@ -1,0 +1,13 @@
+server:
+  port: 8082
+
+spring:
+  cloud:
+    nacos:
+      discovery:
+        password: nacos
+        username: nacos
+        server-addr: localhost:8848
+
+  application:
+    name: service-verificationCode

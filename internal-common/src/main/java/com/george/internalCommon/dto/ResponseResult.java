@@ -26,6 +26,16 @@ public class ResponseResult<T> {
                 setData(data);
     }
 
+
+
+
+    // This function is used to return a successful response with no params
+    public static <T> ResponseResult success() {
+        return new ResponseResult().setCode(CommonStatus.SUCCESS.getCode()).
+                setMessage(CommonStatus.SUCCESS.getMessage());
+    }
+
+
     // This function is used to return a default failure response
     public static <T> ResponseResult fail(T data) {
         return new ResponseResult().setCode(CommonStatus.FAIL.getCode()).

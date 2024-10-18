@@ -1,4 +1,4 @@
-package com.geroge.apipassenger.request;
+package com.george.internalCommon.request;
 
 import lombok.Data;
 
@@ -15,4 +15,6 @@ import lombok.Data;
 public class VerificationCodeDTO {
 
     private String passengerPhone;
+
+    private String verificationCode;
 }

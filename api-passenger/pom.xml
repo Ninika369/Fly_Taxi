@@ -37,12 +37,12 @@
             <artifactId>spring-cloud-starter-loadbalancer</artifactId>
         </dependency>
 
-
         <dependency>
-            <groupId>com.george</groupId>
-            <artifactId>internal-common</artifactId>
-            <version>1.0-SNAPSHOT</version>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
+
+
     </dependencies>
 
 </project>

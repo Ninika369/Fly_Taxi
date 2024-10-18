@@ -13,6 +13,9 @@ import lombok.Getter;
 // Enums to represent the status of returning values
 public enum CommonStatus {
 
+    // The response meaning an incorrect verification code
+    VERIFICATION_ERROR(1099, "Incorrect Verification Code"),
+
     // Pairs of codes and messages
     SUCCESS(1, "success"),
     FAIL(0, "fail")

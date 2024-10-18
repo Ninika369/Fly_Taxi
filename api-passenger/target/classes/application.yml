@@ -9,6 +9,12 @@ spring:
         server-addr: localhost:8848
         username: nacos
         password: nacos
+  redis:
+    host: localhost
+    port: 6379
+    database: 0
+
+
 logging:
   level:
     com.george.apipassenger.remote: DEBUG  # feign 客户端包路径

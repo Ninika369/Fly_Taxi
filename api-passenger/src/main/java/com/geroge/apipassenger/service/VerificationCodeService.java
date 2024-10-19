@@ -1,16 +1,21 @@
 package com.geroge.apipassenger.service;
 
 import com.alibaba.nacos.common.utils.StringUtils;
+import com.auth0.jwt.JWT;
 import com.george.internalCommon.constant.CommonStatus;
+import com.george.internalCommon.constant.UserIdentity;
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.request.VerificationCodeDTO;
 import com.george.internalCommon.response.DataResponse;
 import com.george.internalCommon.response.TokenResponse;
+import com.george.internalCommon.util.JwtUtils;
+import com.george.internalCommon.util.RedisPrefixUtils;
 import com.geroge.apipassenger.remote.ServicePassengerUserClient;
 import com.geroge.apipassenger.remote.serviceVerificationCodeClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+
 
 import java.util.concurrent.TimeUnit;
 
@@ -29,8 +34,6 @@ public class VerificationCodeService {
     @Autowired
     private ServicePassengerUserClient userClient;
 
-    // This variable represents the prefix of verification code stored in Redis
-    private String verificationCodePrefix = "passenger-verification-code-";
 
     // This variable is used to store String object in Redis
     @Autowired
@@ -50,7 +53,7 @@ public class VerificationCodeService {
         int codeNumber = codeResponse.getData().getNumberCode();
 
         System.out.println("Received code: " + codeNumber);
-        String key = generateKey(passengerPhone);
+        String key = RedisPrefixUtils.generateKey(passengerPhone);
 
         // Store verification code in Redis
         redisTemplate.opsForValue().set(key, String.valueOf(codeNumber), 2, TimeUnit.MINUTES);
@@ -61,15 +64,6 @@ public class VerificationCodeService {
     }
 
 
-    /**
-     * Generate a key using an independent function to facilitate the process
-     * @param passengerPhone
-     * @return
-     */
-    private String generateKey(String passengerPhone) {
-        return verificationCodePrefix + passengerPhone;
-    }
-
 
     /**
      * This function is designed to check the correctness of verification codes sent from passenger's phone.
@@ -79,7 +73,7 @@ public class VerificationCodeService {
      */
     public ResponseResult checkCode(String passengerPhone, String verificationCode) {
         // generate the key for checking
-        String key = generateKey(passengerPhone);
+        String key = RedisPrefixUtils.generateKey(passengerPhone);
 
         // attempt to extract value from Redis
         String redisValue = redisTemplate.opsForValue().get(key);
@@ -95,10 +89,17 @@ public class VerificationCodeService {
         verificationCodeDTO.setPassengerPhone(passengerPhone);
         userClient.loginOrRegister(verificationCodeDTO);
 
+        // create a token for the user
+        String token = JwtUtils.generateToken(passengerPhone, UserIdentity.PASSENGER.getIdentity());
+        //store token in Redis
+        String tokenKey = RedisPrefixUtils.generateTokenKey(passengerPhone, UserIdentity.PASSENGER.getIdentity());
+        //store it for up to 30 days
+        redisTemplate.opsForValue().set(tokenKey, token, 30, TimeUnit.DAYS);
+
 
         // return the token to passenger
         TokenResponse tokenResponse = new TokenResponse();
-        tokenResponse.setToken("token value");
+        tokenResponse.setToken(token);
         return ResponseResult.success(tokenResponse);
     }
 }

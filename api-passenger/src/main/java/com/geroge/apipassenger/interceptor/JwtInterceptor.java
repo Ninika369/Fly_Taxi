@@ -3,10 +3,12 @@ package com.geroge.apipassenger.interceptor;
 import com.auth0.jwt.exceptions.AlgorithmMismatchException;
 import com.auth0.jwt.exceptions.SignatureVerificationException;
 import com.auth0.jwt.exceptions.TokenExpiredException;
+import com.george.internalCommon.constant.TokenConstant;
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.dto.TokenResult;
 import com.george.internalCommon.util.JwtUtils;
 import com.george.internalCommon.util.RedisPrefixUtils;
+import jdk.nashorn.internal.parser.Token;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -31,56 +33,38 @@ public class JwtInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        boolean noError = true;
+        boolean hasNoError = true;
         String resultMessage = "";
 
         String token = request.getHeader("Authorization");
-        TokenResult res = null;
+        TokenResult res = JwtUtils.checkToken(token);
 
-        try {
-            res = JwtUtils.parseToken(token);
-        }
-        catch (SignatureVerificationException e) {
-            resultMessage = "token sign error";
-            noError = false;
-        }
-        catch (TokenExpiredException e) {
-            resultMessage = "token expired error";
-            noError = false;
-        }
-        catch (AlgorithmMismatchException e) {
-            resultMessage = "token algorithm error";
-            noError = false;
-        }
-        catch (Exception e) {
-            resultMessage = "token invalid";
-            noError = false;
-        }
+
 
         if (res == null) {
             resultMessage = "token invalid";
-            noError = false;
+            hasNoError = false;
         }
         else {
             // generate the token prefix for further check in Redis
             String phone = res.getPhone();
             String identity = res.getIdentity();
-            String tokenKey = RedisPrefixUtils.generateTokenKey(phone, identity);
+            String tokenKey = RedisPrefixUtils.generateTokenKey(phone, identity, TokenConstant.ACCESS_TOKEN_TYPE);
 
             // check the token using key
             String tokenValue = redisTemplate.opsForValue().get(tokenKey);
             if (tokenValue.trim().equals("") || tokenValue == null || !tokenValue.trim().equals(token.trim())) {
                 resultMessage = "token invalid";
-                noError = false;
+                hasNoError = false;
             }
         }
 
-        if (!noError) {
+        if (!hasNoError) {
             PrintWriter writer = response.getWriter();
             writer.print(new JSONObject(ResponseResult.fail(resultMessage)));
         }
 
 
-        return noError;
+        return hasNoError;
     }
 }

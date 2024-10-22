@@ -18,7 +18,9 @@ public enum CommonStatus {
 
     // Pairs of codes and messages
     SUCCESS(1, "success"),
-    FAIL(0, "fail")
+    FAIL(0, "fail"),
+
+    TOKEN_ERROR(1199, "Wrong Token")
 
     ;
 

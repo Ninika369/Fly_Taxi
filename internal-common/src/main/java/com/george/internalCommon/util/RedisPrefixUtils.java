@@ -28,7 +28,7 @@ public class RedisPrefixUtils {
      * @param identity - identity of users, for example, passengers or drivers
      * @return
      */
-    public static String generateTokenKey(String phone, String identity) {
-        return tokenPrefix + phone + "-" + identity;
+    public static String generateTokenKey(String phone, String identity, String type) {
+        return tokenPrefix + phone + "-" + identity + "-" + type;
     }
 }

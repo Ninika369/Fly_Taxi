@@ -3,6 +3,9 @@ package com.george.internalCommon.util;
 import com.auth0.jwt.JWT;
 import com.auth0.jwt.JWTCreator;
 import com.auth0.jwt.algorithms.Algorithm;
+import com.auth0.jwt.exceptions.AlgorithmMismatchException;
+import com.auth0.jwt.exceptions.SignatureVerificationException;
+import com.auth0.jwt.exceptions.TokenExpiredException;
 import com.auth0.jwt.interfaces.Claim;
 import com.auth0.jwt.interfaces.DecodedJWT;
 import com.george.internalCommon.constant.UserIdentity;
@@ -29,20 +32,23 @@ public class JwtUtils {
     // the identity of user, for instance, passenger or driver
     private static final String KEY_IDENTITY = "identity";
 
+    // the type of token, refresh or access
+    private static final String KEY_TYPE = "type";
+
+    // the time when the token was created
+    private static final String KEY_TIME = "time";
+
     /**
      * This function is used to generate an encoded token that can be sent to users
      * @param passengerPhone -
      * @return - an endoced token String
      */
-    public static String generateToken(String passengerPhone, String identity) {
+    public static String generateToken(String passengerPhone, String identity, String type) {
         Map<String, String> map = new HashMap<>();
         map.put(KEY_PHONE, passengerPhone);
         map.put(KEY_IDENTITY, identity);
-
-//        // token deadline
-//        Calendar calendar = Calendar.getInstance();
-//        calendar.add(Calendar.DATE, 1);
-//        Date date = calendar.getTime();
+        map.put(KEY_TYPE, type);
+        map.put(KEY_TIME, Calendar.getInstance().getTime().toString());
 
         JWTCreator.Builder builder = JWT.create();
 
@@ -74,8 +80,23 @@ public class JwtUtils {
         return result;
     }
 
+    /**
+     * This function is used to check the correctness of token
+     * @param token
+     * @return
+     */
+    public static TokenResult checkToken(String token) {
+        TokenResult res = null;
+        try {
+            res = JwtUtils.parseToken(token);
+        }
+        catch (Exception e) {
+        }
+        return res;
+    }
+
     public static void main(String[] args) {
-        String token = generateToken("13304268325", "1");
+        String token = generateToken("13304268325", "1", "accessToken");
         System.out.println("token is: " + token);
         TokenResult result = parseToken(token);
         System.out.println("decrypted message is: " + result.getPhone() + " | " + result.getIdentity());

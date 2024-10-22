@@ -3,6 +3,7 @@ package com.geroge.apipassenger.service;
 import com.alibaba.nacos.common.utils.StringUtils;
 import com.auth0.jwt.JWT;
 import com.george.internalCommon.constant.CommonStatus;
+import com.george.internalCommon.constant.TokenConstant;
 import com.george.internalCommon.constant.UserIdentity;
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.request.VerificationCodeDTO;
@@ -89,17 +90,30 @@ public class VerificationCodeService {
         verificationCodeDTO.setPassengerPhone(passengerPhone);
         userClient.loginOrRegister(verificationCodeDTO);
 
-        // create a token for the user
-        String token = JwtUtils.generateToken(passengerPhone, UserIdentity.PASSENGER.getIdentity());
-        //store token in Redis
-        String tokenKey = RedisPrefixUtils.generateTokenKey(passengerPhone, UserIdentity.PASSENGER.getIdentity());
-        //store it for up to 30 days
-        redisTemplate.opsForValue().set(tokenKey, token, 30, TimeUnit.DAYS);
+        // create a token for the access of users
+        String accessToken = JwtUtils.generateToken(passengerPhone, UserIdentity.PASSENGER.getIdentity(),
+                TokenConstant.ACCESS_TOKEN_TYPE);
+        // create a token to reassure the identity of users once the accessToken expires
+        String refreshToken =JwtUtils.generateToken(passengerPhone, UserIdentity.PASSENGER.getIdentity(),
+                TokenConstant.REFRESH_TOKEN_TYPE);
+
+        // store token in Redis
+        String accessTokenKey = RedisPrefixUtils.generateTokenKey(passengerPhone,
+                UserIdentity.PASSENGER.getIdentity(), TokenConstant.ACCESS_TOKEN_TYPE);
+        // store it for up to 30 days
+        redisTemplate.opsForValue().set(accessTokenKey, accessToken, 30, TimeUnit.DAYS);
+
+        String refreshTokenKey = RedisPrefixUtils.generateTokenKey(passengerPhone,
+                UserIdentity.PASSENGER.getIdentity(), TokenConstant.REFRESH_TOKEN_TYPE);
+        // store it for up to 32 days,
+        // a little longer than access token to avoid the repeating enter of phone number and VC
+        redisTemplate.opsForValue().set(refreshTokenKey, refreshToken, 32, TimeUnit.DAYS);
 
 
         // return the token to passenger
         TokenResponse tokenResponse = new TokenResponse();
-        tokenResponse.setToken(token);
+        tokenResponse.setAccessToken(accessToken);
+        tokenResponse.setRefreshToken(refreshToken);
         return ResponseResult.success(tokenResponse);
     }
 }

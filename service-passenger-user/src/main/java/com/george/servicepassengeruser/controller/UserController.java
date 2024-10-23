@@ -4,15 +4,13 @@ import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.request.VerificationCodeDTO;
 import com.george.servicepassengeruser.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 /**
  * @Author: George Sun
  * @Date: 2024-10-17-16:47
  * @Description: This class is used to check the existences of user or
- * promote them to register for new accounts.
+ *               promote them to register for new accounts.
  */
 @RestController
 public class UserController {
@@ -23,8 +21,13 @@ public class UserController {
     @PostMapping("/user")
     public ResponseResult loginOrRegister(@RequestBody VerificationCodeDTO codeDTO) {
         String phoneNum = codeDTO.getPassengerPhone();
-        System.out.println("Cellphone: " + phoneNum);
         return userService.checkOrRegister(phoneNum);
+    }
+
+
+    @GetMapping("/get-user/{phone}")
+    public ResponseResult getUser(@PathVariable("phone") String phoneNum) {
+        return userService.getUserByPhone(phoneNum);
     }
 }
 

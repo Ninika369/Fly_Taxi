@@ -7,10 +7,9 @@ import lombok.experimental.Accessors;
 /**
  * @Author: George Sun
  * @Date: 2024-10-13-15:33
- * @Description: com.george.internalCommon.dto
+ * @Description: This class is aimed to create a class which contains different responses
  */
 
-// This class is aimed to create a class which contains different responses
 @Data
 @Accessors(chain = true)
 public class ResponseResult<T> {
@@ -19,24 +18,32 @@ public class ResponseResult<T> {
     private String message;
     private T data;
 
-    // This function is used to return a successful response
+    /**
+     * This function is used to return a successful response
+     * @param data - the data in response
+     * @return - the returning info for users
+     */
     public static <T> ResponseResult success(T data) {
         return new ResponseResult().setCode(CommonStatus.SUCCESS.getCode()).
                 setMessage(CommonStatus.SUCCESS.getMessage()).
                 setData(data);
     }
 
-
-
-
-    // This function is used to return a successful response with no params
+    /**
+     * This function is used to return a successful response with no params
+     * @return - the returning info for users
+     */
     public static <T> ResponseResult success() {
         return new ResponseResult().setCode(CommonStatus.SUCCESS.getCode()).
                 setMessage(CommonStatus.SUCCESS.getMessage());
     }
 
 
-    // This function is used to return a default failure response
+    /**
+     * This function is used to return a default failure response
+     * @param data - the data in response
+     * @return
+     */
     public static <T> ResponseResult fail(T data) {
         return new ResponseResult().setCode(CommonStatus.FAIL.getCode()).
                 setMessage(CommonStatus.FAIL.getMessage()).

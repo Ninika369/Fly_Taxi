@@ -1,14 +1,13 @@
-package com.george.servicepassengeruser.dto;
+package com.george.internalCommon.dto;
 
 import lombok.Data;
 
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 
 /**
  * @Author: George Sun
  * @Date: 2024-10-17-19:26
- * @Description: com.george.servicepassengeruser.dto
+ * @Description: This class is used to represent the info stored in MySQL that can represent passengers
  */
 
 @Data
@@ -27,6 +26,8 @@ public class PassengerUser {
     private byte passengerGender;
 
     private byte state;
+
+    private String profilePhoto;
 
 
 

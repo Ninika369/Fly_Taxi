@@ -5,7 +5,7 @@ import lombok.Data;
 /**
  * @Author: George Sun
  * @Date: 2024-10-16-22:42
- * @Description: com.george.internalCommon.response
+ * @Description: This class contains two types of tokens
  */
 @Data
 public class TokenResponse {

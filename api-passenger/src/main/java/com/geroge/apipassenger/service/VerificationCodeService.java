@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * @Author: George Sun
  * @Date: 2024-10-12-19:17
- * @Description: com.geroge.apipassenger.service
+ * @Description: This class is used to generate or check the verification code that users entered
  */
 @Service
 public class VerificationCodeService {
@@ -48,12 +48,9 @@ public class VerificationCodeService {
      */
     public ResponseResult generateCode (String passengerPhone) {
         // Obtain a verification code
-        System.out.println("get a VC");
-
         ResponseResult<DataResponse> codeResponse = serviceClient.getResponse(6);
         int codeNumber = codeResponse.getData().getNumberCode();
 
-        System.out.println("Received code: " + codeNumber);
         String key = RedisPrefixUtils.generateKey(passengerPhone);
 
         // Store verification code in Redis

@@ -13,14 +13,18 @@ import lombok.Getter;
 // Enums to represent the status of returning values
 public enum CommonStatus {
 
-    // The response meaning an incorrect verification code
+    // The response meaning an incorrect verification code, from 1000-1099
     VERIFICATION_ERROR(1099, "Incorrect Verification Code"),
 
     // Pairs of codes and messages
     SUCCESS(1, "success"),
     FAIL(0, "fail"),
 
-    TOKEN_ERROR(1199, "Wrong Token")
+    // Token Error, from 1100-1199
+    TOKEN_ERROR(1199, "Wrong Token"),
+
+    // User Error, from 1200-1299
+    USER_NOT_EXISTS(1200, "User is not existed")
 
     ;
 

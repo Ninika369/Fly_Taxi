@@ -5,7 +5,7 @@ import lombok.Data;
 /**
  * @Author: George Sun
  * @Date: 2024-10-13-16:36
- * @Description: com.george.internalCommon.response
+ * @Description: This class is aimed to contain the verification code
  */
 @Data
 public class DataResponse {

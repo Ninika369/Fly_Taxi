@@ -3,7 +3,7 @@ package com.george.internalCommon.util;
 /**
  * @Author: George Sun
  * @Date: 2024-10-19-18:22
- * @Description: com.george.internalCommon.util
+ * @Description: This class is to generate the keys using prefix
  */
 public class RedisPrefixUtils {
 

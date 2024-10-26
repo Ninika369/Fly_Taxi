@@ -11,9 +11,8 @@ import org.springframework.web.bind.annotation.RequestMethod;
 /**
  * @Author: George Sun
  * @Date: 2024-10-25-16:31
- * @Description: com.george.serviceprice.map
+ * @Description: The interface used to connect with map service
  */
-
 @FeignClient("service-map")
 public interface ServiceMapClient {
 

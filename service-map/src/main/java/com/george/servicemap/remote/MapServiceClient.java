@@ -14,18 +14,29 @@ import org.springframework.web.client.RestTemplate;
 /**
  * @Author: George Sun
  * @Date: 2024-10-24-20:03
- * @Description: com.george.servicemap.remote
+ * @Description: This class is used to call Amap service
  */
 @Service
 @Slf4j
 public class MapServiceClient {
 
+    // user key to access info
     @Value("${amap.key}")
     private String mapKey;
 
+    // send HTTP requests and receiving responses
     @Autowired
     private RestTemplate restTemplate;
 
+    /**
+     * This function is used to combine a list of input parameters into an important url to
+     * connect with Amap and to return the necessary info
+     * @param depLatitude - the latitude of the origin
+     * @param depLongitude - the longitude of the origin
+     * @param destLatitude - the latitude of the destination
+     * @param destLongitude - the longitude of the destination
+     * @return - the object containing distance and duration of a ride
+     */
     public DirectionResponse direction(String depLatitude, String depLongitude,
                                        String destLatitude, String destLongitude) {
         // combination request to call url
@@ -48,6 +59,11 @@ public class MapServiceClient {
     }
 
 
+    /**
+     * This function is to extract necessary info, distance and duration, from input string
+     * @param directionString - a long string from which essential data is needed to be extracted
+     * @return - an object containing essential info
+     */
     public DirectionResponse parseDirectionEntity(String directionString) {
         DirectionResponse result = null;
         try {
@@ -81,8 +97,4 @@ public class MapServiceClient {
         return result;
     }
 
-
-    public static void main(String[] args) {
-        System.out.println(10 + 15 + 20 + 30 + 40);
-    }
 }

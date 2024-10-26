@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * @Author: George Sun
  * @Date: 2024-10-24-15:24
- * @Description: com.george.serviceprice.controller
+ * @Description: The controller representing the interface
  */
 @RestController
 public class PredictPriceController {

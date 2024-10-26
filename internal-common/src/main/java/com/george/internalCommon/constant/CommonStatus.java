@@ -24,7 +24,10 @@ public enum CommonStatus {
     TOKEN_ERROR(1199, "Wrong Token"),
 
     // User Error, from 1200-1299
-    USER_NOT_EXISTS(1200, "User is not existed")
+    USER_NOT_EXISTS(1200, "User is not existed"),
+
+    // price rule not exists, from 1300-1399
+    PRICE_RULE_NOT_EXISTS(1300, "price rules do not exist")
 
     ;
 

@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * @Author: George Sun
  * @Date: 2024-10-24-18:04
- * @Description: com.george.servicemap.controller
+ * @Description: The controller as the interface to connect with Amap
  */
 @RestController
 @RequestMapping("/direction")

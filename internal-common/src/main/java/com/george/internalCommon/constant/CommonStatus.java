@@ -27,7 +27,10 @@ public enum CommonStatus {
     USER_NOT_EXISTS(1200, "User is not existed"),
 
     // price rule not exists, from 1300-1399
-    PRICE_RULE_NOT_EXISTS(1300, "price rules do not exist")
+    PRICE_RULE_NOT_EXISTS(1300, "Price rules do not exist"),
+
+    // the map returned from Amap is invalid, from 1300-1399
+    MAP_DISTRICT_ERROR(1400, "Request map error")
 
     ;
 

@@ -1,9 +1,9 @@
 spring:
   application:
-    name: service-map
+    name: service-driver-user
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/service-map?characterEncoding=utf-8&serverTimezone=GMT%2B8
+    url: jdbc:mysql://localhost:3306/service-driver-user?characterEncoding=utf-8&serverTimezone=GMT%2B8
     username: root
     password: sunhaoxian
   cloud:
@@ -12,8 +12,7 @@ spring:
         server-addr: localhost:8848
         username: nacos
         password: nacos
-server:
-  port: 8085
 
-amap:
-  key: 8d6ad7004c8ed0c8f2fd4f2a932a87a9
+
+server:
+  port: 8086

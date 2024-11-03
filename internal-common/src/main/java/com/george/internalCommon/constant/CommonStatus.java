@@ -30,8 +30,21 @@ public enum CommonStatus {
     PRICE_RULE_NOT_EXISTS(1300, "Price rules do not exist"),
 
     // the map returned from Amap is invalid, from 1300-1399
-    MAP_DISTRICT_ERROR(1400, "Request map error")
+    MAP_DISTRICT_ERROR(1400, "Request map error"),
 
+    // indicates the relationship between the driver and the vehicle from 1500-1599
+    DRIVER_CAR_BIND_NOT_EXISTS(1500, "Binding relationship between driver and vehicle does not exist"),
+
+    DRIVER_NOT_EXISTS(1501, "Driver does not exist"),
+
+    DRIVER_CAR_BIND_EXISTS(1502,
+            "Binding relationship between driver and vehicle has already existed, please don't rebind"),
+
+    DRIVER_BIND_EXISTS(1503,
+            "Driver has already been bound, please don't rebind"),
+
+    CAR_BIND_EXISTS(1504,
+            "Car has already been bound, please don't rebind")
     ;
 
     @Getter

@@ -17,13 +17,18 @@ import java.util.Map;
 /**
  * @Author: George Sun
  * @Date: 2024-11-03-13:03
- * @Description: com.george.servicedriveruser.service
+ * @Description: This class is to provide services for the driver and the vehicle to bind a relationship
  */
 @Service
 public class DriverCarBindingRelationshipService {
     @Autowired
     private DriverCarBindingRelationshipMapper mapper;
 
+    /**
+     * This function is to bind a relationship between driver and vehicle
+     * @param bindingRelationship - the given relationship
+     * @return
+     */
     public ResponseResult bind(DriverCarBindingRelationship bindingRelationship) {
         // if the vehicle and the driver have already been bound, then no need to rebind them
         QueryWrapper<DriverCarBindingRelationship> queryWrapper = new QueryWrapper<>();
@@ -56,7 +61,7 @@ public class DriverCarBindingRelationshipService {
                     CommonStatus.CAR_BIND_EXISTS.getMessage());
         }
 
-
+        // set the binding parameters
         LocalDateTime now = LocalDateTime.now();
         bindingRelationship.setBindingTime(now);
 
@@ -66,21 +71,29 @@ public class DriverCarBindingRelationshipService {
         return ResponseResult.success("");
     }
 
+    /**
+     * This function is to unbind a relationship between driver and vehicle
+     * @param bindingRelationship - the given relationship
+     * @return
+     */
     public ResponseResult unbind(DriverCarBindingRelationship bindingRelationship) {
+        // get the data from database
         Map<String, Object> map = new HashMap<>();
         map.put("driver_id", bindingRelationship.getDriverId());
         map.put("car_id", bindingRelationship.getCarId());
         map.put("bind_state", DriverCarConstant.DRIVER_CAR_BIND);
-
         List<DriverCarBindingRelationship> driverCarBindingRelationships = mapper.selectByMap(map);
+
+        // if the relationship does not exist
         if (driverCarBindingRelationships.isEmpty()) {
             return ResponseResult.fail(CommonStatus.DRIVER_CAR_BIND_NOT_EXISTS.getCode(),
                     CommonStatus.DRIVER_CAR_BIND_NOT_EXISTS.getMessage());
         }
+
+        // set the binding parameters
         DriverCarBindingRelationship relationship = driverCarBindingRelationships.get(0);
         relationship.setBindState(DriverCarConstant.DRIVER_CAR_UNBIND);
         relationship.setUnBindingTime(LocalDateTime.now());
-
         mapper.updateById(relationship);
         return ResponseResult.success("");
     }

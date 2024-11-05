@@ -23,7 +23,7 @@ public class MysqlGenerator {
                             "/Users/sunhaoxian/Desktop/fly_taxi/FlyTaxi/service-driver-user/src/main/java/com/george/servicedriveruser/mapper"));
                 })
                 .strategyConfig(builder -> {
-                    builder.addInclude("driver_car_binding_relationship");
+                    builder.addInclude("driver_user_work_status");
                 })
                 .templateEngine(new FreemarkerTemplateEngine())
                 .execute();

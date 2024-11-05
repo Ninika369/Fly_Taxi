@@ -7,10 +7,9 @@ import lombok.Getter;
 /**
  * @Author: George Sun
  * @Date: 2024-10-13-15:22
- * @Description: com.george.internalCommon.constant
+ * @Description: Enums to represent the status of returning values
  */
 @AllArgsConstructor
-// Enums to represent the status of returning values
 public enum CommonStatus {
 
     // The response meaning an incorrect verification code, from 1000-1099
@@ -35,10 +34,12 @@ public enum CommonStatus {
     // indicates the relationship between the driver and the vehicle from 1500-1599
     DRIVER_CAR_BIND_NOT_EXISTS(1500, "Binding relationship between driver and vehicle does not exist"),
 
-    DRIVER_NOT_EXISTS(1501, "Driver does not exist"),
-
     DRIVER_CAR_BIND_EXISTS(1502,
             "Binding relationship between driver and vehicle has already existed, please don't rebind"),
+
+    // if the driver does not exist in dataset
+    DRIVER_NOT_EXISTS(1501, "Driver does not exist"),
+
 
     DRIVER_BIND_EXISTS(1503,
             "Driver has already been bound, please don't rebind"),

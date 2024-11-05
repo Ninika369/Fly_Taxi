@@ -6,7 +6,7 @@ import lombok.Getter;
 /**
  * @Author: George Sun
  * @Date: 2024-10-18-20:45
- * @Description: com.george.internalCommon.constant
+ * @Description: This enumeration is used to represent the identity of different users
  */
 @AllArgsConstructor
 public enum UserIdentity {

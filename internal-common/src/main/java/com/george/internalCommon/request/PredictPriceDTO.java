@@ -5,7 +5,7 @@ import lombok.Data;
 /**
  * @Author: George Sun
  * @Date: 2024-10-23-20:06
- * @Description: com.george.internalCommon.request
+ * @Description: This class stores the information needed to predict the price of a journey
  */
 
 @Data

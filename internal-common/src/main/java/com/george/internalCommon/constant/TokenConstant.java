@@ -3,7 +3,7 @@ package com.george.internalCommon.constant;
 /**
  * @Author: George Sun
  * @Date: 2024-10-21-14:32
- * @Description: com.george.internalCommon.constant
+ * @Description: This class is aimed to store the two types of tokens
  */
 public class TokenConstant {
 

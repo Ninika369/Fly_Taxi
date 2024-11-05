@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 /**
  * @Author: George Sun
  * @Date: 2024-11-01-22:34
- * @Description: com.george.servicedriveruser.service
+ * @Description: This class provides service to add a car in database
  */
 @Service
 public class CarService {

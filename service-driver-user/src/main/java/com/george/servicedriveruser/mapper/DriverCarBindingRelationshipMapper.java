@@ -6,7 +6,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * <p>
- *  Mapper 接口
+ *  Mapper interface to bind relationship
  * </p>
  *
  * @author george

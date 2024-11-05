@@ -1,18 +1,18 @@
 package com.george.servicedriveruser.mapper;
 
-import com.george.internalCommon.dto.Car;
+import com.george.internalCommon.dto.DriverUserWorkStatus;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.springframework.stereotype.Repository;
 
 /**
  * <p>
- *  Mapper interface for vehicle
+ *  Mapper interface for driver status
  * </p>
  *
  * @author george
- * @since 2024-11-01
+ * @since 2024-11-04
  */
 @Repository
-public interface CarMapper extends BaseMapper<Car> {
+public interface DriverUserWorkStatusMapper extends BaseMapper<DriverUserWorkStatus> {
 
 }

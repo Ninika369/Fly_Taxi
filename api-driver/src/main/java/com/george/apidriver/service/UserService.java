@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service;
 /**
  * @Author: George Sun
  * @Date: 2024-11-01-18:24
- * @Description: com.george.apidriver.service
+ * @Description: This class provides a function to update the info of a driver
  */
 @Service
 public class UserService {

@@ -51,7 +51,7 @@ public class VerificationCodeService {
         ResponseResult<DataResponse> codeResponse = serviceClient.getResponse(6);
         int codeNumber = codeResponse.getData().getNumberCode();
 
-        String key = RedisPrefixUtils.generateKey(passengerPhone);
+        String key = RedisPrefixUtils.generateKey(passengerPhone, UserIdentity.PASSENGER.getIdentity());
 
         // Store verification code in Redis
         redisTemplate.opsForValue().set(key, String.valueOf(codeNumber), 2, TimeUnit.MINUTES);
@@ -71,7 +71,7 @@ public class VerificationCodeService {
      */
     public ResponseResult checkCode(String passengerPhone, String verificationCode) {
         // generate the key for checking
-        String key = RedisPrefixUtils.generateKey(passengerPhone);
+        String key = RedisPrefixUtils.generateKey(passengerPhone, UserIdentity.PASSENGER.getIdentity());
 
         // attempt to extract value from Redis
         String redisValue = redisTemplate.opsForValue().get(key);

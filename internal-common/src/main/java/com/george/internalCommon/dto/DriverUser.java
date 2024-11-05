@@ -9,7 +9,7 @@ import java.util.Date;
 /**
  * @Author: George Sun
  * @Date: 2024-10-30-20:53
- * @Description: com.george.internalCommon.dto
+ * @Description: This class stores all the information of a driver in the database
  */
 @Data
 public class DriverUser {

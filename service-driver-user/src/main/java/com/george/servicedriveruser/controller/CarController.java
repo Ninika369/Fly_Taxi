@@ -13,18 +13,18 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * <p>
- *  前端控制器
- * </p>
- *
- * @author george
- * @since 2024-11-01
+ * This class is to control the client side
  */
 @RestController
 public class CarController {
     @Autowired
     private CarService service;
 
+    /**
+     * The functino to add a mew car in dataset
+     * @param car - the car to be added
+     * @return
+     */
     @PostMapping("/car")
     public ResponseResult addCar(@RequestBody Car car) {
 

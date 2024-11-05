@@ -12,12 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * <p>
- *  前端控制器
- * </p>
- *
- * @author george
- * @since 2024-11-03
+ * This class is to bind the relationship between a driver and a vehicle
  */
 @RestController
 @RequestMapping("/driver-car-binding-relationship")
@@ -25,11 +20,21 @@ public class DriverCarBindingRelationshipController {
     @Autowired
     private DriverCarBindingRelationshipService service;
 
+    /**
+     * The function used to bind the relationship between a driver and a vehicle
+     * @param bindingRelationship - the binding relationship
+     * @return
+     */
     @PostMapping("/bind")
     public ResponseResult bind(@RequestBody DriverCarBindingRelationship bindingRelationship) {
         return service.bind(bindingRelationship);
     }
 
+    /**
+     * The function used to unbind the relationship between a driver and a vehicle
+     * @param bindingRelationship - the un-binding relationship
+     * @return
+     */
     @PostMapping("/unbind")
     public ResponseResult unbind(@RequestBody DriverCarBindingRelationship bindingRelationship) {
         return service.unbind(bindingRelationship);

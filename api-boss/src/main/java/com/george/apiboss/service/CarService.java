@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service;
 /**
  * @Author: George Sun
  * @Date: 2024-11-03-16:35
- * @Description: com.george.apiboss.service
+ * @Description: This class is aimed to add a car using remote connection
  */
 @Service
 public class CarService {

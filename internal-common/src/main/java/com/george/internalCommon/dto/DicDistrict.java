@@ -5,7 +5,7 @@ import lombok.Data;
 /**
  * @Author: George Sun
  * @Date: 2024-10-27-18:01
- * @Description: com.george.internalCommon.dto
+ * @Description: This class stores all the Chinese addresses
  */
 @Data
 public class DicDistrict {

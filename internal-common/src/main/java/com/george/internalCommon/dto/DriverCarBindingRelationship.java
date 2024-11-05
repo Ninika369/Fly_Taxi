@@ -7,7 +7,7 @@ import java.time.LocalDateTime;
 
 /**
  * <p>
- * 
+ * This class stores information of a relationship between a driver and a car
  * </p>
  *
  * @author george

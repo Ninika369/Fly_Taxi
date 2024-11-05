@@ -3,7 +3,7 @@ package com.george.internalCommon.constant;
 /**
  * @Author: George Sun
  * @Date: 2024-10-18-20:47
- * @Description: com.george.internalCommon.constant
+ * @Description: This class is used to represent the identity of different users
  */
 
 public class IdentityConstant {

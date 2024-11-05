@@ -5,7 +5,7 @@ import lombok.Data;
 /**
  * @Author: George Sun
  * @Date: 2024-10-23-20:20
- * @Description: com.george.internalCommon.response
+ * @Description: This class stores the price of a trip
  */
 @Data
 public class PredictPriceResponse {

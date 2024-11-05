@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 /**
  * @Author: George Sun
  * @Date: 2024-11-01-10:57
- * @Description: com.george.apiboss.remote
+ * @Description: This class provides connection with the remote server
  */
 
 @FeignClient("service-driver-user")

@@ -8,7 +8,7 @@ package com.george.internalCommon.util;
 public class RedisPrefixUtils {
 
     // This variable represents the prefix of verification code stored in Redis
-    public static String verificationCodePrefix = "passenger-verification-code-";
+    public static String verificationCodePrefix = "verification-code-";
 
     // This variable represents the prefix of tokens stored in Redis
     public static String tokenPrefix = "token-";
@@ -18,8 +18,8 @@ public class RedisPrefixUtils {
      * @param passengerPhone
      * @return
      */
-    public static String generateKey(String passengerPhone) {
-        return verificationCodePrefix + passengerPhone;
+    public static String generateKey(String passengerPhone, String identity) {
+        return verificationCodePrefix + identity+ "-" + passengerPhone;
     }
 
     /**
@@ -31,4 +31,5 @@ public class RedisPrefixUtils {
     public static String generateTokenKey(String phone, String identity, String type) {
         return tokenPrefix + phone + "-" + identity + "-" + type;
     }
+
 }

@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * @Author: George Sun
  * @Date: 2024-11-01-18:24
- * @Description: com.george.apidriver.controller
+ * @Description: The class to update driver info from the driver side
  */
 @RestController
 public class UserController {

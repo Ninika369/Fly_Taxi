@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 
 /**
  * <p>
- * 
+ * This class stores all the information of a vehicle in the database
  * </p>
  *
  * @author george

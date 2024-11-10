@@ -1,0 +1,21 @@
+service creation
+{
+    "errcode": 10000,
+    "errmsg": "OK",
+    "data": {
+        "name": "fly_taxi_service",
+        "sid": 1040514
+    }
+}
+
+
+terminal creation
+{
+    "errcode": 10000,
+    "errmsg": "OK",
+    "data": {
+        "name": "car1",
+        "tid": 1065157130,
+        "sid": 1040514
+    }
+}

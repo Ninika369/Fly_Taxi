@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 /**
  * @Author: George Sun
  * @Date: 2024-10-28-13:32
- * @Description: com.george.servicemap.service
+ * @Description: This class is used to provide functionality to extract dictionary of district
  */
 @Service
 public class DictDistrictService {
@@ -29,6 +29,11 @@ public class DictDistrictService {
     @Autowired
     private DicDistrictMapper mapper;
 
+    /**
+     * This method is used to initialize the dictionary of all districts in the area of the input parameter
+     * @param keywords - the area where all the districts would be set in the dictionary
+     * @return
+     */
     public ResponseResult initDicDistrict(String keywords) {
 
         String dicDistrictResult = client.dicDistrict(keywords);
@@ -41,6 +46,7 @@ public class DictDistrictService {
                     CommonStatus.MAP_DISTRICT_ERROR.getMessage());
         }
 
+        // loop through each level to fill in the dictionary
         JSONArray countryArray = dicDistrictJsonObject.getJSONArray(AmapConfigConstant.DISTRICTS);
         for (int i = 0; i < countryArray.length(); i++) {
             JSONObject countryObject  = countryArray.getJSONObject(i);
@@ -96,6 +102,13 @@ public class DictDistrictService {
         return ResponseResult.success("");
     }
 
+    /**
+     * This method set the code of the district and insert the info into the database
+     * @param addressCode - the code of the district
+     * @param nameCode - the name of the district
+     * @param parentAddressCode - where the district belongs
+     * @param levelInt - the level of the district
+     */
     public void addDistrict(String addressCode, String nameCode, String parentAddressCode, int levelInt) {
         DicDistrict dicDistrict = new DicDistrict();
         dicDistrict.setAddressCode(addressCode);
@@ -106,6 +119,12 @@ public class DictDistrictService {
         mapper.insert(dicDistrict);
     }
 
+
+    /**
+     * This method is to get the level representation of districts in China
+     * @param level - 0 means country; 1 means province; 2 means city
+     * @return
+     */
     public int getLevel(String level) {
         int levelInt = 0;
         if (level.trim().equals("country")) {

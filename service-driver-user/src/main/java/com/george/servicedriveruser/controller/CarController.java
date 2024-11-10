@@ -5,12 +5,8 @@ import com.george.internalCommon.dto.Car;
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.servicedriveruser.service.CarService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.*;
 
-import org.springframework.stereotype.Controller;
-import org.springframework.web.bind.annotation.RestController;
 
 /**
  * This class is to control the client side
@@ -21,7 +17,7 @@ public class CarController {
     private CarService service;
 
     /**
-     * The functino to add a mew car in dataset
+     * The function is to add a mew car in dataset
      * @param car - the car to be added
      * @return
      */
@@ -29,5 +25,16 @@ public class CarController {
     public ResponseResult addCar(@RequestBody Car car) {
 
         return service.addCar(car);
+    }
+
+    /**
+     * This function aims to return the car info by its id
+     * @param carId
+     * @return
+     */
+    @GetMapping("/car")
+    public ResponseResult getCarById(Long carId){
+
+        return service.getCarById(carId);
     }
 }

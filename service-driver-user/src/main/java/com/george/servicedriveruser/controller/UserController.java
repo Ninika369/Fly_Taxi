@@ -1,9 +1,12 @@
 package com.george.servicedriveruser.controller;
 
 import com.george.internalCommon.constant.DriverCarConstant;
+import com.george.internalCommon.dto.DriverCarBindingRelationship;
 import com.george.internalCommon.dto.DriverUser;
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.response.DriverUserExistsResponse;
+import com.george.internalCommon.response.OrderDriverResponse;
+import com.george.servicedriveruser.service.DriverCarBindingRelationshipService;
 import com.george.servicedriveruser.service.DriverUserService;
 import lombok.extern.slf4j.Slf4j;
 import org.json.JSONObject;
@@ -48,7 +51,7 @@ public class UserController {
     /**
      * check the existence of a driver according to the phone number
      * @param driverPhone - the phone number of the driver
-     * @return
+     * @return - 1 means the driver exists, otherwise 0
      */
     @GetMapping("/check-driver/{driverPhone}")
     public ResponseResult<DriverUserExistsResponse> getUser(@PathVariable("driverPhone") String driverPhone){
@@ -68,5 +71,28 @@ public class UserController {
         response.setIfExists(ifExists);
 
         return ResponseResult.success(response);
+    }
+
+    /**
+     * 根据车辆Id查询订单需要的司机信息
+     * @param carId
+     * @return
+     */
+    @GetMapping("/get-available-driver/{carId}")
+    public ResponseResult<OrderDriverResponse> getAvailableDriver(@PathVariable("carId") Long carId){
+        return driverUserService.getAvailableDriver(carId);
+    }
+
+    @Autowired
+    DriverCarBindingRelationshipService driverCarBindingRelationshipService;
+
+    /**
+     * 根据司机手机号查询司机和车辆绑定关系
+     * @param driverPhone
+     * @return
+     */
+    @GetMapping("/driver-car-binding-relationship")
+    public ResponseResult<DriverCarBindingRelationship> getDriverCarRelationShip(@RequestParam String driverPhone){
+        return driverCarBindingRelationshipService.getDriverCarRelationShipByDriverPhone(driverPhone);
     }
 }

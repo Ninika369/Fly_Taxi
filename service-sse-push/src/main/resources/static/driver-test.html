@@ -1,0 +1,46 @@
+<html lang="en">
+<body>
+<h1>Driver Listener</h1>
+<button onclick="setMessageContent('Clicked')">showMessage</button>
+<div id="message">show info from server</br></div>
+
+<button onclick="sourceClose()">closeConnection</button>
+
+<script>
+    userId = "1853412123516973058";
+    identity = 2;
+    source = null;
+
+    if(window.EventSource){
+        console.info("This server supports SSE");
+        // Build connection
+        source = new EventSource("http://localhost:9000/connect?userId="+userId+"&identity="+identity);
+
+        // Listen for messages pushed by the server
+        source.addEventListener("message",function (e){
+            content = e.data;
+            console.info("Message Info："+content);
+
+            setMessageContent(content);
+        });
+
+    }else {
+        setMessageContent("browser not allowed");
+    }
+
+    function setMessageContent(content){
+        document.getElementById("message").innerHTML+= (content+'</br>');
+    }
+
+    function sourceClose(){
+        console.info("close function executed");
+        // Close the client source
+        source.close();
+        // Remove the server map
+        httpRequest = new XMLHttpRequest();
+        httpRequest.open("get","http://localhost:9000/close?userId="+userId+"&identity="+identity);
+        httpRequest.send();
+    }
+</script>
+</body>
+</html>

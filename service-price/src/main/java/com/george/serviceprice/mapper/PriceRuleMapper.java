@@ -1,13 +1,13 @@
 package com.george.serviceprice.mapper;
 
-import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.george.internalCommon.dto.PriceRule;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.springframework.stereotype.Repository;
 
 /**
- * @Author: George Sun
- * @Date: 2024-10-25-19:54
- * @Description: remotely connect with map service using mybatis-plus
+ * This class is used to join the table of pricing rules
+ * @author george
+ * @since 2024-11-12
  */
 @Repository
 public interface PriceRuleMapper extends BaseMapper<PriceRule> {

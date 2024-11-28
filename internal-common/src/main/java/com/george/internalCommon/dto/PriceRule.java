@@ -2,13 +2,17 @@ package com.george.internalCommon.dto;
 
 import lombok.Data;
 
+import java.io.Serializable;
+
 /**
- * @Author: George Sun
- * @Date: 2024-10-25-19:55
- * @Description: Ths class used to connect with dataset and containing each element of the table
+ * This class contains information related to the pricing rule of the orders
+ * @author george
+ * @since 2024-11-12
  */
 @Data
-public class PriceRule {
+public class PriceRule implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private String cityCode;
 
@@ -21,4 +25,9 @@ public class PriceRule {
     private Double unitPricePerMile;
 
     private Double unitPricePerMinute;
+
+    private String fareType;
+
+    private Integer fareVersion;
+
 }

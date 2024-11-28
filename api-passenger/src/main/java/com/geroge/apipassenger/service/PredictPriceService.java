@@ -30,17 +30,19 @@ public class PredictPriceService {
      * @return
      */
     public ResponseResult predictPrice(String depLatitude, String depLongitude,
-                                       String destLatitude, String destLongitude) {
+                                       String destLatitude, String destLongitude,
+                                       String cityCode, String vehicleType) {
 
         PredictPriceDTO priceDTO = new PredictPriceDTO();
         priceDTO.setDepLongitude(depLongitude);
         priceDTO.setDepLatitude(depLatitude);
         priceDTO.setDestLongitude(destLongitude);
         priceDTO.setDestLatitude(destLatitude);
+        priceDTO.setCityCode(cityCode);
+        priceDTO.setVehicleType(vehicleType);
+        ResponseResult result = client.predictPrice(priceDTO);
 
         // call calculation function to get predicted price
-        ResponseResult responseResult = client.predictPrice(priceDTO);
-
-        return responseResult;
+        return ResponseResult.success(result.getData());
     }
 }

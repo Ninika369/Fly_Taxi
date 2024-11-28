@@ -9,7 +9,7 @@ import java.util.Collections;
 /**
  * @Author: George Sun
  * @Date: 2024-11-01-22:17
- * @Description: Automatically generated variables for database
+ * @Description: This class is to automatically generate variables for database
  */
 public class MysqlGenerator {
     public static void main(String[] args) {

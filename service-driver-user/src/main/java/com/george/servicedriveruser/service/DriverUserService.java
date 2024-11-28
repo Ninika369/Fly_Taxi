@@ -1,10 +1,12 @@
 package com.george.servicedriveruser.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.george.internalCommon.constant.CommonStatus;
 import com.george.internalCommon.constant.DriverCarConstant;
-import com.george.internalCommon.dto.DriverUser;
-import com.george.internalCommon.dto.DriverUserWorkStatus;
-import com.george.internalCommon.dto.ResponseResult;
+import com.george.internalCommon.dto.*;
+import com.george.internalCommon.response.OrderDriverResponse;
+import com.george.servicedriveruser.mapper.CarMapper;
+import com.george.servicedriveruser.mapper.DriverCarBindingRelationshipMapper;
 import com.george.servicedriveruser.mapper.DriverUserMapper;
 import com.george.servicedriveruser.mapper.DriverUserWorkStatusMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +30,9 @@ public class DriverUserService {
 
     @Autowired
     private DriverUserWorkStatusMapper driverUserWorkStatusMapper;
+
+    @Autowired
+    private CarMapper carMapper;
 
     /**
      * This method is used to add a new driver to database
@@ -85,5 +90,60 @@ public class DriverUserService {
         }
         DriverUser driverUser = driverUsers.get(0);
         return ResponseResult.success(driverUser);
+    }
+
+    @Autowired
+    DriverCarBindingRelationshipMapper driverCarBindingRelationshipMapper;
+
+    /**
+     * Check available driver information based on vehicle information
+     * @param carId - the id of the vehicle
+     * @return
+     */
+    public ResponseResult<OrderDriverResponse> getAvailableDriver(Long carId){
+        // Vehicle and driver binding relationship query
+        QueryWrapper<DriverCarBindingRelationship> driverCarBindingRelationshipQueryWrapper = new QueryWrapper<>();
+        driverCarBindingRelationshipQueryWrapper.eq("car_id",carId);
+        driverCarBindingRelationshipQueryWrapper.eq("bind_state",DriverCarConstant.DRIVER_CAR_BIND);
+
+        DriverCarBindingRelationship driverCarBindingRelationship = driverCarBindingRelationshipMapper.selectOne(driverCarBindingRelationshipQueryWrapper);
+        if (driverCarBindingRelationship == null) {
+            return ResponseResult.fail(CommonStatus.DRIVER_CAR_BIND_NOT_EXISTS.getCode(),
+                    CommonStatus.DRIVER_CAR_BIND_NOT_EXISTS.getMessage());
+        }
+        Long driverId = driverCarBindingRelationship.getDriverId();
+
+        // Query the driver's working status
+        QueryWrapper<DriverUserWorkStatus> driverUserWorkStatusQueryWrapper = new QueryWrapper<>();
+        driverUserWorkStatusQueryWrapper.eq("driver_id",driverId);
+        driverUserWorkStatusQueryWrapper.eq("work_status",DriverCarConstant.DRIVER_WORK_STATUS_START);
+
+        DriverUserWorkStatus driverUserWorkStatus = driverUserWorkStatusMapper.selectOne(driverUserWorkStatusQueryWrapper);
+        if (null == driverUserWorkStatus){
+            return ResponseResult.fail(CommonStatus.NO_AVAILABLE_DRIVER.getCode(),CommonStatus.NO_AVAILABLE_DRIVER.getMessage());
+
+        }
+        else {
+            // Query driver information
+            QueryWrapper<DriverUser> driverUserQueryWrapper = new QueryWrapper<>();
+            driverUserQueryWrapper.eq("id",driverId);
+            DriverUser driverUser = driverUserMapper.selectOne(driverUserQueryWrapper);
+            // Query car information
+            QueryWrapper<Car> carQueryWrapper = new QueryWrapper<>();
+            carQueryWrapper.eq("id",carId);
+            Car car = carMapper.selectOne(carQueryWrapper);
+
+            // set driver and car information in an order
+            OrderDriverResponse orderDriverResponse = new OrderDriverResponse();
+            orderDriverResponse.setCarId(carId);
+            orderDriverResponse.setDriverId(driverId);
+            orderDriverResponse.setDriverPhone(driverUser.getDriverPhone());
+
+            orderDriverResponse.setLicenseId(driverUser.getLicenseId());
+            orderDriverResponse.setVehicleNo(car.getVehicleNo());
+            orderDriverResponse.setVehicleType(car.getVehicleType());
+
+            return ResponseResult.success(orderDriverResponse);
+        }
     }
 }

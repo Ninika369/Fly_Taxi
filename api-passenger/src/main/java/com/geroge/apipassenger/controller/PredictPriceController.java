@@ -34,7 +34,9 @@ public class PredictPriceController {
         String depLongitude = priceDTO.getDepLongitude();
         String destLatitude = priceDTO.getDestLatitude();
         String destLongitude = priceDTO.getDestLongitude();
+        String cityCode = priceDTO.getCityCode();
+        String vehicleType = priceDTO.getVehicleType();
 
-        return priceService.predictPrice(depLatitude, depLongitude, destLatitude, destLongitude);
+        return priceService.predictPrice(depLatitude, depLongitude, destLatitude, destLongitude, cityCode, vehicleType);
     }
 }

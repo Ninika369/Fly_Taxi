@@ -1,5 +1,6 @@
 package com.george.serviceprice.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.george.internalCommon.constant.CommonStatus;
 import com.george.internalCommon.dto.PriceRule;
 import com.george.internalCommon.dto.ResponseResult;
@@ -46,7 +47,8 @@ public class PredictPriceService {
      * @return
      */
     public ResponseResult predictPrice(String depLatitude, String depLongitude,
-                                       String destLatitude, String destLongitude) {
+                                       String destLatitude, String destLongitude,
+                                       String cityCode, String vehicleType) {
 
         // assemble all the parameter into a single object
         PredictPriceDTO priceDTO = new PredictPriceDTO();
@@ -61,10 +63,12 @@ public class PredictPriceService {
         Integer duration = directionResponse.getData().getDuration();
 
         // load calculation rules
-        Map<String, Object> map = new HashMap<>();
-        map.put("city_code", "110000");
-        map.put("vehicle_type", "1");
-        List<PriceRule> priceRules = mapper.selectByMap(map);
+        QueryWrapper queryWrapper = new QueryWrapper();
+        queryWrapper.eq("city_code", cityCode);
+        queryWrapper.eq("vehicle_type", vehicleType);
+        queryWrapper.orderByDesc("fare_version");
+
+        List<PriceRule> priceRules = mapper.selectList(queryWrapper);
         if (priceRules.isEmpty()) {
             return ResponseResult.fail(CommonStatus.PRICE_RULE_NOT_EXISTS.getCode(),
                                         CommonStatus.PRICE_RULE_NOT_EXISTS.getMessage());
@@ -75,19 +79,50 @@ public class PredictPriceService {
         double price = calculatePrice(distance, duration, rule);
         PredictPriceResponse predictPriceResponse = new PredictPriceResponse();
         predictPriceResponse.setPrice(price);
+        predictPriceResponse.setCityCode(cityCode);
+        predictPriceResponse.setVehicleType(vehicleType);
+        predictPriceResponse.setFareType(rule.getFareType());
+        predictPriceResponse.setFareVersion(rule.getFareVersion());
 
         return ResponseResult.success(predictPriceResponse);
     }
 
+    /**
+     * This function is used to get the actual price
+     * @param distance
+     * @param duration
+     * @param cityCode
+     * @param vehicleType
+     * @return
+     */
+    public ResponseResult<Double> getPrice( Integer distance ,  Integer duration, String cityCode, String vehicleType){
+        // Query pricing rules
+        QueryWrapper queryWrapper = new QueryWrapper();
+        queryWrapper.eq("city_code",cityCode);
+        queryWrapper.eq("vehicle_type",vehicleType);
+        queryWrapper.orderByDesc("fare_version");
+
+        List<PriceRule> priceRules = mapper.selectList(queryWrapper);
+        if (priceRules.size() == 0){
+            return ResponseResult.fail(CommonStatus.PRICE_RULE_NOT_EXISTS.getCode(),
+                    CommonStatus.PRICE_RULE_NOT_EXISTS.getMessage());
+        }
+
+        PriceRule priceRule = priceRules.get(0);
+
+        double price = calculatePrice(distance, duration, priceRule);
+        return ResponseResult.success(price);
+    }
+
 
     /**
-     * Calculate the predicted price according to input parameters.
+     * This function is aimed to calculate the predicted price according to input parameters.
      * @param distance - distance of the ride
      * @param duration - the time spent on the ride
      * @param rule - the rules stipulating how to calculate the price
      * @return
      */
-   private double calculatePrice(Integer distance, Integer duration, PriceRule rule) {
+   public double calculatePrice(Integer distance, Integer duration, PriceRule rule) {
        double result = 0.0;
 
        // get the starting fare

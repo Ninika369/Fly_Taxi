@@ -13,8 +13,11 @@ public class RedisPrefixUtils {
     // This variable represents the prefix of tokens stored in Redis
     public static String tokenPrefix = "token-";
 
+    // device code in black list
+    public static String blackDeviceCodePrefix = "black-device-";
+
     /**
-     * Generate a key using an independent function to facilitate the process
+     * Generate a key when processing verification codes
      * @param passengerPhone
      * @return
      */

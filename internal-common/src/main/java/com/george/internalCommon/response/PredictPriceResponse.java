@@ -10,5 +10,9 @@ import lombok.Data;
 @Data
 public class PredictPriceResponse {
     private double price;
+    private String cityCode;
+    private String vehicleType;
+    private Integer fareVersion;
+    private String fareType;
 
 }

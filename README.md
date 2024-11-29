@@ -215,9 +215,3 @@ To report issues, please open an issue in the **Issues** section of the reposito
 - **Dynamic pricing algorithm** for better fare estimation.
 - **Driver reservation system** for advanced order scheduling.
 - **Refined user experience** with mobile app enhancements.
-
----
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

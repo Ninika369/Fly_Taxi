@@ -12,7 +12,6 @@ FlyTaxi is a scalable ride-hailing platform designed to connect passengers, driv
 - [API Documentation](#api-documentation)
 - [Contributing](#contributing)
 - [Future Improvements](#future-improvements)
-- [License](#license)
 
 ---
 

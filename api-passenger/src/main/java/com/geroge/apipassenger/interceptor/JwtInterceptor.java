@@ -8,7 +8,6 @@ import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.dto.TokenResult;
 import com.george.internalCommon.util.JwtUtils;
 import com.george.internalCommon.util.RedisPrefixUtils;
-import jdk.nashorn.internal.parser.Token;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;

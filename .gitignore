@@ -1,0 +1,22 @@
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Java build
+target/
+*.class
+*.jar
+*.war
+
+# Logs
+*.log
+
+# Environment
+.env
+*.env.local

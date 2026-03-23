@@ -150,7 +150,7 @@ public class PredictPriceService {
        double unitPricePerMinute = rule.getUnitPricePerMinute();
        double timeFare = BigDecimalUtils.multiply(timeInMinutes, unitPricePerMinute);
        result = BigDecimalUtils.add(timeFare, result);
-       BigDecimal res = new BigDecimal(result);
+       BigDecimal res = BigDecimal.valueOf(result);
        res = res.setScale(2, BigDecimal.ROUND_HALF_UP);
 
        return res.doubleValue();

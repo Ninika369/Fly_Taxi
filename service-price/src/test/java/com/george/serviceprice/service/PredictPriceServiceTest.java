@@ -228,22 +228,18 @@ class PredictPriceServiceTest {
     }
 
     @Test
-    @DisplayName("Precision trap: new BigDecimal(double) may mis-round .005 boundary")
+    @DisplayName("Regression: .005 boundary rounds UP correctly after BigDecimal.valueOf fix")
     void should_handlePointZeroZeroFiveBoundary_when_totalEndsInHalfCent() {
-        // New BigDecimal(double) introduces binary float error.
-        // For example, new BigDecimal(10.005) is actually 10.004999999...,
-        // so setScale(2, ROUND_HALF_UP) may round DOWN instead of UP.
+        // The .005 rounding boundary previously triggered a precision bug:
+        // new BigDecimal(10.005) stored as 10.004999999..., causing ROUND_HALF_UP
+        // to round DOWN to 10.00 instead of UP to 10.01.
         //
-        // startFare=10.0, mileageFee=0, timeFee=0.005
-        // timeFee = timeInMinutes * unitPricePerMinute
-        // divide(1, 60) = 0.02 min * 0.25/min = 0.005
-        // total = 10.0 + 0.005 = 10.005
+        // Fix: replaced new BigDecimal(result) with BigDecimal.valueOf(result)
+        // in PredictPriceService.calculatePrice() (line 153).
         //
-        // With BigDecimal.valueOf(10.005) -> rounds to 10.01 (correct HALF_UP)
-        // With new BigDecimal(10.005)     -> might round to 10.00 (precision loss)
-        //
-        // This is a CHARACTERIZATION TEST: we record what ACTUALLY happens,
-        // so if we later fix the BigDecimal constructor, the test catches it.
+        // Setup: startFare=10.0, mileageFee=0, timeFee=0.005
+        // timeFee = divide(1, 60) * 0.25 = 0.02 * 0.25 = 0.005
+        // total = 10.0 + 0.005 = 10.005 -> should round to 10.01
         PriceRule rule = new PriceRule();
         rule.setStartFare(10.0);
         rule.setStartMile(999);
@@ -251,11 +247,8 @@ class PredictPriceServiceTest {
         rule.setUnitPricePerMinute(0.25);
 
         double price = priceService.calculatePrice(0, 1, rule);
-        // Record actual behavior — if this is 10.00 instead of 10.01,
-        // that confirms the BigDecimal(double) precision issue.
-        // Either way, we lock it down so future changes are visible.
-        assertTrue(price == 10.00 || price == 10.01,
-                "Expected 10.00 or 10.01, got " + price);
+        assertEquals(10.01, price, 1e-10,
+                "After BigDecimal.valueOf fix, .005 should round UP correctly");
     }
 
     // ======================== Final rounding verification ========================
@@ -286,24 +279,18 @@ class PredictPriceServiceTest {
     // This test documents whether the current code is affected.
 
     @Test
-    @DisplayName("Precision trap: total ending in .005 may round incorrectly due to new BigDecimal(double)")
+    @DisplayName("Regression: 1.005 total rounds UP to 1.01 after BigDecimal.valueOf fix")
     void should_exposePointFiveRoundingBehavior_when_totalEndsIn005() {
-        // Goal: engineer inputs so the raw double total lands near x.xx5
+        // The .005 rounding boundary previously triggered a precision bug:
+        // new BigDecimal(1.005) stored as 1.00499999..., causing ROUND_HALF_UP
+        // to round DOWN to 1.00 instead of UP to 1.01.
         //
-        // startFare=10.0, startMile=1, unitPricePerMile=1.0, unitPricePerMinute=0
-        // distance=1010m -> divide(1010,1000) = 1.01km
-        // mileDiff = 1.01 - 1 = 0.01
-        // mileageFee = 0.01 * 1.0 = 0.01
-        // subtotal = 10.0 + 0.01 = 10.01  (clean, no .005 issue here)
+        // Fix: replaced new BigDecimal(result) with BigDecimal.valueOf(result)
+        // in PredictPriceService.calculatePrice() (line 153).
         //
-        // Now a trickier one: try to get exactly x.x05
-        // startFare=0.1, startMile=0, unitPricePerMile=0.1, unitPricePerMinute=0
+        // Setup: startFare=0.1, startMile=0, unitPricePerMile=0.1
         // distance=9050m -> 9.05km, mileageFee = 9.05 * 0.1 = 0.905
-        // total = 0.1 + 0.905 = 1.005
-        // new BigDecimal(1.005) is actually 1.00499999... -> rounds to 1.00
-        // But BigDecimal.valueOf(1.005) would give 1.01
-        //
-        // This is a CHARACTERIZATION TEST: we record what the code actually does.
+        // total = 0.1 + 0.905 = 1.005 -> should round to 1.01
         PriceRule rule = new PriceRule();
         rule.setStartFare(0.1);
         rule.setStartMile(0);
@@ -311,17 +298,8 @@ class PredictPriceServiceTest {
         rule.setUnitPricePerMinute(0.0);
 
         double price = priceService.calculatePrice(9050, 0, rule);
-
-        // If this equals 1.00, the code has the new BigDecimal(double) precision bug.
-        // If this equals 1.01, the code is rounding correctly.
-        // We'll let the test TELL US which one it is.
-        //
-        // Based on manual trace: 0.1 + 9.05*0.1 = 0.1 + 0.905 = 1.005
-        // new BigDecimal(1.005).setScale(2, HALF_UP) -> likely 1.0 (the known bug)
-        // Uncomment the correct assertion after running:
-        //
-        assertTrue(price == 1.0 || price == 1.01,
-                "Expected either 1.0 (bug) or 1.01 (correct). Got: " + price);
+        assertEquals(1.01, price, 1e-10,
+                "After BigDecimal.valueOf fix, .005 should round UP correctly");
     }
 
     // ======================== Negative input defense ========================

@@ -5,12 +5,12 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/service-price?characterEncoding=utf-8&serverTimezone=GMT%2B8
     username: root
-    password: sunhaoxian
+    password: ${DB_PASSWORD:sunhaoxian}
   cloud:
     nacos:
       discovery:
         server-addr: localhost:8848
         username: nacos
-        password: nacos
+        password: ${NACOS_PASSWORD:nacos}
 server:
   port: 8084

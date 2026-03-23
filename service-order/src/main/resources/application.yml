@@ -5,13 +5,13 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/service-order?characterEncoding=utf-8&serverTimezone=GMT%2B8
     username: root
-    password: sunhaoxian
+    password: ${DB_PASSWORD:sunhaoxian}
   cloud:
     nacos:
       discovery:
         server-addr: localhost:8848
         username: nacos
-        password: nacos
+        password: ${NACOS_PASSWORD:nacos}
   redis:
     port: 6379
     host: localhost
@@ -19,8 +19,8 @@ spring:
 
 
 amap:
-  key: 8d6ad7004c8ed0c8f2fd4f2a932a87a9
-  sid: 1040409
+  key: ${AMAP_KEY:8d6ad7004c8ed0c8f2fd4f2a932a87a9}
+  sid: ${AMAP_SID:1040409}
 
 ---
 spring:

@@ -63,12 +63,16 @@ flowchart LR
     AP --> VC
     AD --> O
     AD --> DU
+    AD --> M
+    AD --> VC
     AD -. SSE .-> EV
     AB --> DU
+    PR --> M
     O --> PR
     O --> M
     O --> DU
-    O --> EV
+    O -. status push .-> EV
+    DU --> M
     PAY --> O
     M --> AM
     PAY --> AL

@@ -1,216 +1,241 @@
-# FlyTaxi Ride-Hailing Platform
+# FlyTaxi — Microservices Ride-Hailing Platform
 
-FlyTaxi is a scalable ride-hailing platform designed to connect passengers, drivers, and administrators. Built with modern technologies like **microservices architecture**, **distributed systems**, and **real-time data processing**, this platform ensures high performance, reliability, and scalability.
+[![CI - Run Unit Tests](https://github.com/Ninika369/Fly_Taxi/actions/workflows/ci.yml/badge.svg)](https://github.com/Ninika369/Fly_Taxi/actions/workflows/ci.yml)
 
-## Table of Contents
-- [Overview](#overview)
-- [Features](#features)
-- [System Architecture](#system-architecture)
-- [Modules](#modules)
-- [Installation](#installation)
-- [Usage](#usage)
-- [API Documentation](#api-documentation)
-- [Contributing](#contributing)
-- [Future Improvements](#future-improvements)
+A backend ride-hailing platform built with **Java / Spring Boot / Spring Cloud** microservices architecture. Features real-time driver-passenger matching via SSE, dynamic pricing with versioned rules, and integrated payment processing.
+
+> **Security note:** Environment-variable-based configuration has been introduced for the currently CI-tested modules (`service-price` and `service-order`). Some other modules still use local sandbox/default values and are being externalized before container/cloud deployment.
 
 ---
 
-## Overview
+## Tech Stack
 
-FlyTaxi is a full-fledged ride-hailing system that includes services for passengers, drivers, and administrators. The project uses a **microservices architecture** to ensure scalability, with an emphasis on real-world functionalities like **ride estimation**, **real-time driver/passenger matching**, and **payment integration**. This project serves as both a technical showcase and a real-world application.
+**Backend:** Java 8, Spring Boot 2.4, Spring Cloud, MyBatis-Plus, OpenFeign
 
----
+**Infrastructure:** MySQL, Redis, Nacos (service discovery & config)
 
-## Features
+**API Edge:** api-passenger, api-driver, api-boss (Spring Boot gateway modules with JWT authentication)
 
-### Passenger Features:
-- **Sign Up/Login**: Passengers can register and log in using their phone number and OTP (One-Time Password).
-- **Price Estimation**: Estimate the price of a ride based on the start and end points.
-- **Ride Ordering**: Once the price is estimated, passengers can place a booking for a ride.
-- **Payment Integration**: Integrated with **Alipay** for payment processing.
+**APIs & Integration:** Amap (Gaode Maps) API, Alipay Sandbox, Server-Sent Events (SSE)
 
-### Driver Features:
-- **Driver Sign Up/Login**: Drivers can sign up and log in via phone number and OTP.
-- **Ride Matching**: Drivers receive orders based on proximity and availability.
-- **Order Status**: Track ride statuses (New, Dispatched, Accepted, In Progress, Completed).
-- **Payment Request**: Drivers can request payment once the ride is completed.
-
-### Admin (BOSS) Features:
-- **User Management**: Admin can manage passengers, blacklist users, and resolve disputes.
-- **Driver Management**: Admin can register drivers, verify driver credentials, and assign vehicles.
-- **Vehicle Management**: Admin can manage vehicle information and statuses.
+**Engineering:** JUnit 5, Mockito, GitHub Actions CI, OpenAPI/Swagger (springdoc)
 
 ---
 
 ## System Architecture
 
-The project follows a **microservices architecture**, which is divided into the following layers:
+The platform follows a layered microservices architecture with 11 independently deployable modules and 1 shared common library:
 
-1. **Frontend Layer**:
-    - Passenger App
-    - Driver App
-    - Admin Web Portal
-    - WeChat Mini Program
+```mermaid
+graph TB
+    subgraph Client["Client Layer"]
+        PA[Passenger App]
+        DA[Driver App]
+        AP[Admin Portal]
+    end
+    subgraph Gateway["API Gateway Layer"]
+        API_P["api-passenger<br/>:8081"]
+        API_D["api-driver<br/>:8088"]
+        API_B["api-boss<br/>:8087"]
+    end
+    subgraph Services["Business Services"]
+        SP["service-price<br/>:8084<br/>⭐ Pricing Engine"]
+        SO["service-order<br/>:8089<br/>Order Lifecycle"]
+        SM["service-map<br/>:8085<br/>Route Calculation"]
+        SDU["service-driver-user<br/>:8086"]
+        SPU["service-passenger-user<br/>:8083"]
+        SVC["service-verificationCode<br/>:8082"]
+        SPAY["service-pay<br/>:9001"]
+        SSE["service-sse-push<br/>:9000<br/>Real-time Events"]
+    end
+    subgraph Common["Shared Library"]
+        IC["internal-common<br/>DTOs · Utils · Constants"]
+    end
+    subgraph Infra["Infrastructure"]
+        MySQL[(MySQL)]
+        Redis[(Redis)]
+        Nacos["Nacos<br/>Discovery & Config"]
+        Amap["Amap API<br/>Maps & Routes"]
+        Alipay["Alipay<br/>Sandbox"]
+    end
+    PA --> API_P
+    DA --> API_D
+    AP --> API_B
+    API_P --> SP
+    API_P --> SO
+    API_P --> SPU
+    API_P --> SVC
+    API_D --> SO
+    API_D --> SDU
+    API_D --> SM
+    API_D --> SVC
+    API_D -.->|SSE connection| SSE
+    API_B --> SDU
+    SP --> SM
+    SO --> SP
+    SO --> SM
+    SO --> SDU
+    SO -.->|SSE push| SSE
+    SDU --> SM
+    SPAY --> SO
+    SPAY --> Alipay
+    SM --> Amap
+    SP --> MySQL
+    SO --> MySQL
+    SDU --> MySQL
+    SPU --> MySQL
+    SO --> Redis
+    SVC --> Redis
+    IC -.-|used by all services| Services
+    SP -.-> Nacos
+    SO -.-> Nacos
+    SM -.-> Nacos
+    SDU -.-> Nacos
+    SPU -.-> Nacos
+```
 
-2. **API Gateway Layer**:
-    - Load balancing and request routing.
-
-3. **Business Logic Layer**:
-    - The core services handling passenger, driver, and admin operations.
-
-4. **Capability Services Layer**:
-    - Includes services for authentication, payment integration, and order management.
-
-5. **Data Storage Layer**:
-    - A centralized database for storing user, ride, and system data.
-
-6. **Logging and Monitoring**:
-    - For tracking system errors, application logs, and performance metrics.
+**Key data flows:**
+- **Price prediction:** Client → api-passenger → service-price → service-map (Amap distance/duration) → calculatePrice() → Client
+- **Order lifecycle:** Create → Dispatch → Accept → Depart → Arrive → Pick up → Drop off → Payment
+- **Real-time updates:** Order status changes push to passengers/drivers via SSE (Server-Sent Events)
 
 ---
 
 ## Modules
 
-1. **Passenger Service (`service-passenger-user`)**:
-    - Manages passenger-related functionalities such as registration, booking, and payment.
-    - **Tech Stack**: Spring Boot, MyBatis, Redis
-
-2. **Driver Service (`service-driver-user`)**:
-    - Handles driver-related operations like ride matching, acceptance, and status tracking.
-    - **Tech Stack**: Spring Boot, MyBatis, Redis
-
-3. **Order Service (`service-order`)**:
-    - Manages the lifecycle of ride orders, from creation to completion.
-    - **Tech Stack**: Spring Boot, MyBatis, Redis
-
-4. **Payment Service (`service-payment`)**:
-    - Integrates **Alipay** for processing payments.
-    - **Tech Stack**: Spring Boot, Alipay SDK
-
-5. **Map Service (`service-map`)**:
-    - Integrates **Gaode Map (Amap)** for real-time route optimization and navigation.
-    - **Tech Stack**: Spring Boot, Amap API
-
-6. **Verification Code Service (`service-verificationCode`)**:
-    - Handles OTP verification for user authentication.
-    - **Tech Stack**: Spring Boot, Redis
-
-7. **Payment Service (`service-pay`)**:
-    - Integrates Alipay for secure and reliable payment processing.
-    - **Tech Stack**: Spring Boot, Alipay SDK, REST API
-
-8. **Pricing Service (`service-price`)**:
-    - Provides dynamic pricing and fare prediction based on rules and distance calculations.
-    - **Tech Stack**: Spring Boot, MyBatis, MySQL
-
-9. **SSE Push Service (`service-sse-push`)**:
-    - Handles real-time server-sent events for notifications and updates.
-    - **Tech Stack**: Spring Boot, SSE (Server-Sent Events)
+| Module | Port | Description |
+|--------|------|-------------|
+| `api-passenger` | 8081 | Passenger-facing API gateway — ride booking, price prediction, payments |
+| `api-driver` | 8088 | Driver-facing API gateway — order acceptance, location upload, payment requests |
+| `api-boss` | 8087 | Admin API gateway — driver/vehicle management, user administration |
+| `service-price` | 8084 | **Dynamic pricing engine** — fare prediction, rule versioning, price calculation |
+| `service-order` | 8089 | **Order lifecycle management** — state machine, cancellation logic, time-based penalties |
+| `service-map` | 8085 | Map integration — route calculation, distance/duration via Amap API |
+| `service-driver-user` | 8086 | Driver registration, credential verification, vehicle binding |
+| `service-passenger-user` | 8083 | Passenger registration and profile management |
+| `service-verificationCode` | 8082 | OTP generation and validation via Redis TTL |
+| `service-pay` | 9001 | Alipay sandbox payment integration |
+| `service-sse-push` | 9000 | Real-time event push to clients via Server-Sent Events |
+| `internal-common` | — | Shared library — DTOs, utilities, constants (no web server) |
 
 ---
 
-## Testing
+## Engineering Practices
 
-Testing is a crucial part of the development process. The following tools were used for testing the application:
+### Test Automation — 48 CI-verified unit tests across 4 test classes
 
-1. **ApiFox**:
-    - Used for **unit testing individual requests** to ensure proper API functionality.
+The CI pipeline currently runs 48 pure unit tests (no Spring context, no database) across `internal-common`, `service-price`, and `service-order`, using **JUnit 5** and **Mockito**.
 
-2. **JMeter**:
-    - Used to test the application under **multi-threaded and high concurrency** conditions, ensuring stability and performance under load.
+Several auto-generated Spring context smoke tests still exist in other modules and are currently excluded from CI because they require live infrastructure.
 
----
+| Test Class | Module | Tests | What It Covers |
+|-----------|--------|-------|----------------|
+| `BigDecimalUtilsTest` | internal-common | 11 | Arithmetic precision — add, subtract, multiply, divide, edge cases (zero, negative, divide-by-zero) |
+| `PredictPriceServiceTest` | service-price | 13 | Pricing formula — normal trips, short trips, traffic jams, rounding boundaries (995m/1004m/1005m), duration staircase, regression tests for .005 precision fix |
+| `PriceRuleServiceTest` | service-price | 8 | Rule versioning — create, edit with change detection, duplicate rejection, fareType composition, version auto-increment |
+| `OrderInfoServiceTest` | service-order | 16 | Order cancellation state machine — 5 passenger states, 4 driver states, time boundary (1m59s free vs 2m0s penalty), Mockito verify() for DB writes |
 
-## Installation
+### Precision Bug Discovery & Fix
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/your-username/FlyTaxi.git
-   cd FlyTaxi
-   ```
-2. **Install dependencies**:  
-   Use Maven to install project dependencies.
-   ```bash
-   mvn clean install
-   ```
-3. **Database Setup**:
-   Set up a MySQL database and configure the database credentials in application.yml.
+During testing, we discovered a **half-cent rounding bug** in the pricing calculation:
 
----
-## Usage
+**Root cause:** `new BigDecimal(double)` introduces binary floating-point error. For example, `new BigDecimal(1.005)` is internally stored as `1.00499999...`, causing `setScale(2, ROUND_HALF_UP)` to round *down* to `1.00` instead of *up* to `1.01`.
 
-Once the system is set up, you can start using the services through the following endpoints:
+**Process:** Wrote characterization tests to document the bug → confirmed the behavior → fixed with `BigDecimal.valueOf(result)` → tightened tests into regression tests to prevent recurrence.
 
-- **Passenger API** (`api-passenger`): Access the app at `http://localhost:8081` to make bookings, track rides, and make payments.
-- **Verification Code Service** (`service-verificationCode`): Access the service at `http://localhost:8082` for OTP verification.
-- **Passenger User Service** (`service-passenger-user`): Access the service at `http://localhost:8083` for passenger user management.
-- **Price Service** (`service-price`): Access the service at `http://localhost:8084` for fare calculations.
-- **Map Service** (`service-map`): Access the service at `http://localhost:8085` for route optimization.
-- **Driver User Service** (`service-driver-user`): Access the service at `http://localhost:8086` for driver user management.
-- **Admin API** (`api-boss`): Access the admin panel at `http://localhost:8087` to manage users, drivers, and vehicles.
-- **Driver API** (`api-driver`): Access the API at `http://localhost:8088` to manage driver operations.
-- **Order Service** (`service-order`): Access the service at `http://localhost:8089` for ride order management.
-- **SSE Push Service** (`service-sse-push`): Access the service at `http://localhost:9000` for simulating the user front-end page.
-- **Pay Service** (`service-pay`): Access the service at `http://localhost:9001` for finishing the payment of an order.
+**Commit:** `fix: resolve .005 precision bug using BigDecimal.valueOf`
 
----
+### CI/CD — GitHub Actions
 
-## API Documentation
+Every push to `master` triggers automated testing:
 
-The project exposes the following three APIs:
+1. **Build** — `mvn clean install -DskipTests` (compile all 12 modules)
+2. **Test** — `mvn test -pl internal-common,service-price,service-order` (run 48 targeted unit tests)
 
-### **Passenger API (`api-passenger`)**
-1. **Verification Code**:
-    - **GET** `/verification-code`: Generate a verification code for a passenger.
-    - **POST** `/verification-code_check`: Validate the verification code for a passenger.
-2. **Order Management**:
-    - **POST** `/order/add`: Create a new ride order.
-    - **GET** `/order/cancel`: Cancel an existing order.
-3. **Predict Price**:
-    - **GET** `/price/predict`: Get an estimated price for a ride based on start and end points.
+CI is intentionally scoped to the 3 modules with substantive unit tests. Several auto-generated Spring context smoke tests in other modules are not part of the pipeline because they depend on live infrastructure such as MySQL, Redis, or Nacos.
 
+### API Documentation — OpenAPI / Swagger
 
+Interactive API documentation is available for the pricing service:
 
-### **Driver API (`api-driver`)**
-1. **Verification Code**:
-    - **POST** `/verification-code`: Send a verification code to a driver.
-    - **POST** `/verification-code-check`: Validate the verification code for a driver.
-2. **Order Management**:
-    - **POST** `/order/**`: Give the driver the ability to change the order status and cancel the order.
-3. **Driver Location**:
-    - **POST** `/point/upload`: Update the driver’s real-time location.
-4. **Payment**:
-    - **POST** `/pay/push-pay-info`: Allow the driver to initiate payment by providing order ID, price, and passenger ID.
+- **Swagger UI:** `http://localhost:8084/swagger-ui.html` (when service-price is running)
+- **OpenAPI spec:** `http://localhost:8084/v3/api-docs`
 
+All 7 endpoints in service-price are documented with `@Operation` summaries, `@Parameter` descriptions, and `@Schema` annotations on DTOs with example values.
 
+### Security — Secrets Externalization
 
-### **Admin API (`api-boss`)**
-1. **Driver and Vehicle Management**:
-    - **POST** `/driver-car-binding-relationship/bind`: Bind a driver to a vehicle.
-    - **POST** `/driver-car-binding-relationship/unbind`: Unbind a driver from a vehicle.
-    - **POST** `/driver-user`: Add a new driver to the system.
-    - **PUT** `/driver-user`: Update the driver info in the system.
-    - **POST** `/car`: Add a new car to the system.
+Hardcoded credentials in CI-tested modules have been replaced with environment variable placeholders:
 
-### **Notes:**
-- Each endpoint supports JSON-based request and response formats.
-- Authentication is required for most endpoints, managed via JWT.
-- For additional details, refer to the inline documentation in the codebase or contact the development team.
+```yaml
+# Example: service-price/application.yml
+password: ${DB_PASSWORD:sunhaoxian}    # reads from env var, falls back to dev default
+```
 
+This applies to database passwords, Nacos credentials, and third-party API keys in `service-price` and `service-order`. Remaining modules are scheduled for externalization before container/cloud deployment.
 
 ---
 
-## Contributing
+## If you're reviewing the code, start here
 
-Contributions are welcome! If you'd like to contribute, please fork the repository and submit a pull request with your changes.
-
-To report issues, please open an issue in the **Issues** section of the repository.
+- [`PredictPriceService.java`](service-price/src/main/java/com/george/serviceprice/service/PredictPriceService.java) — core pricing logic with BigDecimal precision fix
+- [`PredictPriceServiceTest.java`](service-price/src/test/java/com/george/serviceprice/service/PredictPriceServiceTest.java) — 13 tests including rounding boundary and regression tests
+- [`OrderInfoServiceTest.java`](service-order/src/test/java/com/george/serviceorder/service/OrderInfoServiceTest.java) — 16 tests covering cancellation state machine with Mockito
+- [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — CI pipeline configuration
 
 ---
 
-## Future Improvements
+## Getting Started
 
-- **Real-time ride tracking** using WebSockets or gRPC.
-- **Dynamic pricing algorithm** for better fare estimation.
-- **Driver reservation system** for advanced order scheduling.
-- **Refined user experience** with mobile app enhancements.
+### Prerequisites
+- Java 8+
+- Maven 3.6+
+- MySQL 5.7+
+- Redis
+- Nacos 2.x
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/Ninika369/Fly_Taxi.git
+cd Fly_Taxi
+
+# Build all modules
+mvn clean install -DskipTests
+
+# Run unit tests (no MySQL/Redis/Nacos required)
+mvn test -pl internal-common,service-price,service-order
+```
+
+### Running the Services
+
+1. Start MySQL and create databases: `service-price`, `service-order`, `service-driver-user`, `service-map`, `service-passenger-user`
+2. Start Redis on default port (6379)
+3. Start Nacos in standalone mode
+4. Launch services individually via IDE or `mvn spring-boot:run` in each module directory
+
+---
+
+## Known Limitations & Roadmap
+
+### Known Issues (documented with tests)
+- **Intermediate rounding:** `BigDecimalUtils.divide()` rounds to 2 decimal places at each step, causing 995m–1004m to all resolve as 1.00km. Characterization tests are in place; fix planned to defer rounding to the final calculation step.
+- **Cancel threshold readability:** `ChronoUnit.MINUTES.between() > 1` effectively means ≥ 2 minutes due to truncation. Semantically clearer as `>= 2`.
+- **Variable naming:** `distanceMiles` / `startMile` should be `distanceKm` / `startKm` to reflect actual units.
+- **No input validation:** Negative distance or duration values are silently accepted, producing incorrect prices.
+
+### Roadmap
+- [ ] Externalize remaining sandbox secrets and JWT signing key
+- [ ] Add request validation (`@Valid` / `@Positive`) for pricing endpoints
+- [ ] Docker Compose for one-command local startup
+- [ ] Single-service cloud deployment (service-price on free PaaS)
+- [ ] Actuator /health endpoint for observability
+- [ ] React thin demo — pricing page + SSE real-time visualization
+- [ ] Strategy Pattern refactor for payment/map provider abstraction
+
+---
+
+## License
+
+This project was built as a portfolio project for educational and demonstration purposes.

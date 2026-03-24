@@ -122,8 +122,6 @@ public class PredictPriceService {
      * @param rule - the rules stipulating how to calculate the price
      * @return
      */
-    // TODO: Technical Debt - Precision loss identified (.005 bug) via unit tests.
-    //  Scheduled for refactor to use BigDecimal.valueOf().
    public double calculatePrice(Integer distance, Integer duration, PriceRule rule) {
        double result = 0.0;
 

@@ -27,71 +27,80 @@ A backend ride-hailing platform built with **Java / Spring Boot / Spring Cloud**
 The platform follows a layered microservices architecture with 11 independently deployable modules and 1 shared common library:
 
 ```mermaid
-graph TB
-    subgraph Client["Client Layer"]
+flowchart TB
+    subgraph Client Layer
         PA[Passenger App]
         DA[Driver App]
         AP[Admin Portal]
     end
-    subgraph Gateway["API Gateway Layer"]
-        API_P["api-passenger<br/>:8081"]
-        API_D["api-driver<br/>:8088"]
-        API_B["api-boss<br/>:8087"]
+
+    subgraph API Entry Services
+        API_P[api-passenger :8081]
+        API_D[api-driver :8088]
+        API_B[api-boss :8087]
     end
-    subgraph Services["Business Services"]
-        SP["service-price<br/>:8084<br/>⭐ Pricing Engine"]
-        SO["service-order<br/>:8089<br/>Order Lifecycle"]
-        SM["service-map<br/>:8085<br/>Route Calculation"]
-        SDU["service-driver-user<br/>:8086"]
-        SPU["service-passenger-user<br/>:8083"]
-        SVC["service-verificationCode<br/>:8082"]
-        SPAY["service-pay<br/>:9001"]
-        SSE["service-sse-push<br/>:9000<br/>Real-time Events"]
+
+    subgraph Business Services
+        SP[service-price :8084<br/> Pricing Engine]
+        SO[service-order :8089<br/>Order Lifecycle]
+        SM[service-map :8085<br/>Route Calc]
+        SDU[service-driver-user :8086]
+        SPU[service-passenger-user :8083]
+        SVC[service-verificationCode :8082]
+        SPAY[service-pay :9001]
+        SSE[service-sse-push :9000<br/>Real-time Events]
     end
-    subgraph Common["Shared Library"]
-        IC["internal-common<br/>DTOs · Utils · Constants"]
-    end
-    subgraph Infra["Infrastructure"]
+
+    subgraph Infrastructure
         MySQL[(MySQL)]
         Redis[(Redis)]
-        Nacos["Nacos<br/>Discovery & Config"]
-        Amap["Amap API<br/>Maps & Routes"]
-        Alipay["Alipay<br/>Sandbox"]
+        Amap[Amap API]
+        Alipay[Alipay Sandbox]
     end
+    
+    subgraph Global Dependencies
+        Nacos[Nacos: Discovery & Config]
+        IC[internal-common: Shared DTOs/Utils]
+    end
+
     PA --> API_P
     DA --> API_D
     AP --> API_B
+
     API_P --> SP
     API_P --> SO
     API_P --> SPU
     API_P --> SVC
+    
     API_D --> SO
     API_D --> SDU
     API_D --> SM
     API_D --> SVC
     API_D -.->|SSE connection| SSE
+
     API_B --> SDU
+
     SP --> SM
+    
     SO --> SP
     SO --> SM
     SO --> SDU
     SO -.->|SSE push| SSE
+    
     SDU --> SM
+    
     SPAY --> SO
     SPAY --> Alipay
+    
     SM --> Amap
+
     SP --> MySQL
     SO --> MySQL
     SDU --> MySQL
     SPU --> MySQL
+    
     SO --> Redis
     SVC --> Redis
-    IC -.-|used by all services| Services
-    SP -.-> Nacos
-    SO -.-> Nacos
-    SM -.-> Nacos
-    SDU -.-> Nacos
-    SPU -.-> Nacos
 ```
 
 **Key data flows:**

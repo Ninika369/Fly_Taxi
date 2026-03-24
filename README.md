@@ -102,12 +102,6 @@ flowchart LR
     EV -. SSE .-> Passenger
     EV -. SSE .-> Driver
 ```
-
-**Key data flows:**
-- **Price prediction:** Client → api-passenger → service-price → service-map (Amap distance/duration) → calculatePrice() → Client
-- **Order lifecycle:** Create → Dispatch → Accept → Depart → Arrive → Pick up → Drop off → Payment
-- **Real-time updates:** Order status changes push to passengers/drivers via SSE (Server-Sent Events)
-
 ---
 
 ## Modules

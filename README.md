@@ -27,80 +27,80 @@ A backend ride-hailing platform built with **Java / Spring Boot / Spring Cloud**
 The platform follows a layered microservices architecture with 11 independently deployable modules and 1 shared common library:
 
 ```mermaid
-flowchart TB
-    subgraph Client Layer
-        PA[Passenger App]
-        DA[Driver App]
-        AP[Admin Portal]
+flowchart LR
+    subgraph Clients["Client Layer"]
+        P[Passenger App]
+        D[Driver App]
+        A[Admin Portal]
     end
-
-    subgraph API Entry Services
-        API_P[api-passenger :8081]
-        API_D[api-driver :8088]
-        API_B[api-boss :8087]
+    subgraph API["API Entry Services"]
+        AP[api-passenger<br/>:8081]
+        AD[api-driver<br/>:8088]
+        AB[api-boss<br/>:8087]
     end
-
-    subgraph Business Services
-        SP[service-price :8084<br/> Pricing Engine]
-        SO[service-order :8089<br/>Order Lifecycle]
-        SM[service-map :8085<br/>Route Calc]
-        SDU[service-driver-user :8086]
-        SPU[service-passenger-user :8083]
-        SVC[service-verificationCode :8082]
-        SPAY[service-pay :9001]
-        SSE[service-sse-push :9000<br/>Real-time Events]
+    subgraph Core["Core Business Services"]
+        O[service-order<br/>Order Lifecycle]
+        PR[service-price<br/>Pricing Engine]
+        M[service-map<br/>Route Calculation]
+        EV[service-sse-push<br/>Real-time Events]
+        PAY[service-pay<br/>Payment]
     end
-
-    subgraph Infrastructure
-        MySQL[(MySQL)]
-        Redis[(Redis)]
-        Amap[Amap API]
-        Alipay[Alipay Sandbox]
+    subgraph Support["Support Services"]
+        PU[service-passenger-user]
+        DU[service-driver-user]
+        VC[service-verificationCode]
     end
-    
-    subgraph Global Dependencies
-        Nacos[Nacos: Discovery & Config]
-        IC[internal-common: Shared DTOs/Utils]
+    subgraph External["External Systems"]
+        AM[Amap API]
+        AL[Alipay Sandbox]
     end
+    P --> AP
+    D --> AD
+    A --> AB
+    AP --> O
+    AP --> PR
+    AP --> PU
+    AP --> VC
+    AD --> O
+    AD --> DU
+    AD -. SSE .-> EV
+    AB --> DU
+    O --> PR
+    O --> M
+    O --> DU
+    O --> EV
+    PAY --> O
+    M --> AM
+    PAY --> AL
+```
 
-    PA --> API_P
-    DA --> API_D
-    AP --> API_B
+**Shared platform notes:**
+- All services register with **Nacos** for service discovery and configuration management.
+- Core services use **MySQL** for persistence and **Redis** for caching and session management.
+- `internal-common` is a shared library providing DTOs, utilities, and constants across all modules.
 
-    API_P --> SP
-    API_P --> SO
-    API_P --> SPU
-    API_P --> SVC
-    
-    API_D --> SO
-    API_D --> SDU
-    API_D --> SM
-    API_D --> SVC
-    API_D -.->|SSE connection| SSE
+**Key runtime flow — Price prediction:**
+```mermaid
+flowchart LR
+    Client[Passenger App] --> AP[api-passenger]
+    AP --> PR[service-price]
+    PR --> M[service-map]
+    M --> AM[Amap API]
+    PR --> Fare[Predicted Fare Response]
+```
 
-    API_B --> SDU
-
-    SP --> SM
-    
-    SO --> SP
-    SO --> SM
-    SO --> SDU
-    SO -.->|SSE push| SSE
-    
-    SDU --> SM
-    
-    SPAY --> SO
-    SPAY --> Alipay
-    
-    SM --> Amap
-
-    SP --> MySQL
-    SO --> MySQL
-    SDU --> MySQL
-    SPU --> MySQL
-    
-    SO --> Redis
-    SVC --> Redis
+**Key runtime flow — Order lifecycle + SSE:**
+```mermaid
+flowchart LR
+    Passenger[Passenger App] --> AP[api-passenger]
+    Driver[Driver App] --> AD[api-driver]
+    AP --> O[service-order]
+    AD --> O
+    O --> PR[service-price]
+    O --> M[service-map]
+    O -. status push .-> EV[service-sse-push]
+    EV -. SSE .-> Passenger
+    EV -. SSE .-> Driver
 ```
 
 **Key data flows:**

@@ -3,6 +3,9 @@ package com.george.serviceprice.controller;
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.request.PredictPriceDTO;
 import com.george.serviceprice.service.PredictPriceService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -15,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
  * @Description: This controller is used to provide calculations for the price of orders
  */
 @RestController
+@Tag(name = "Price Prediction", description = "Endpoints for estimating and calculating ride fares")
 public class PredictPriceController {
     @Autowired
     PredictPriceService service;
@@ -25,6 +29,8 @@ public class PredictPriceController {
      * @param priceDTO
      * @return
      */
+    @Operation(summary = "Predict ride price",
+            description = "Estimates the fare before a ride begins, based on departure/destination coordinates, city, and vehicle type")
     @PostMapping("/predict-price")
     public ResponseResult predictPrice(@RequestBody PredictPriceDTO priceDTO) {
         String depLatitude = priceDTO.getDepLatitude();
@@ -47,8 +53,14 @@ public class PredictPriceController {
      * @param vehicleType - the vehicle type
      * @return
      */
+    @Operation(summary = "Calculate actual ride price",
+            description = "Calculates the final fare after a ride ends, using actual distance traveled and duration")
     @PostMapping("/calculate-price")
-    public ResponseResult<Double> calculatePrice(@RequestParam Integer distance , @RequestParam Integer duration, @RequestParam String cityCode, @RequestParam String vehicleType){
+    public ResponseResult<Double> calculatePrice(
+            @Parameter(description = "Distance in meters") @RequestParam Integer distance,
+            @Parameter(description = "Duration in seconds") @RequestParam Integer duration,
+            @Parameter(description = "City code (e.g. '110000' for Beijing)") @RequestParam String cityCode,
+            @Parameter(description = "Vehicle type code") @RequestParam String vehicleType){
         return service.getPrice(distance,duration,cityCode,vehicleType);
     }
 }

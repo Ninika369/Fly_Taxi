@@ -14,7 +14,7 @@ A backend ride-hailing platform built with **Java / Spring Boot / Spring Cloud**
 
 **Infrastructure:** MySQL, Redis, Nacos (service discovery & config)
 
-**API Edge:** api-passenger, api-driver, api-boss (Spring Boot gateway modules with JWT authentication)
+**API Edge:** api-passenger, api-driver, api-boss (Spring Boot API entry modules with JWT authentication)
 
 **APIs & Integration:** Amap (Gaode Maps) API, Alipay Sandbox, Server-Sent Events (SSE)
 
@@ -79,9 +79,10 @@ flowchart LR
 ```
 
 **Shared platform notes:**
-- All services register with **Nacos** for service discovery and configuration management.
-- Core services use **MySQL** for persistence and **Redis** for caching and session management.
-- `internal-common` is a shared library providing DTOs, utilities, and constants across all modules.
+- All Spring Boot modules register with **Nacos** for service discovery and configuration.
+- `internal-common` is a shared library used across all modules for DTOs, constants, and utility classes.
+- MySQL-backed services include `service-price`, `service-order`, `service-driver-user`, `service-passenger-user`, and `service-map`.
+- Redis is used in `api-passenger`, `api-driver`, and `service-order` for token/code storage, blacklist checks, and coordination-related runtime state.
 
 **Key runtime flow — Price prediction:**
 ```mermaid
@@ -120,7 +121,7 @@ flowchart LR
 | `service-map` | 8085 | Map integration — route calculation, distance/duration via Amap API |
 | `service-driver-user` | 8086 | Driver registration, credential verification, vehicle binding |
 | `service-passenger-user` | 8083 | Passenger registration and profile management |
-| `service-verificationCode` | 8082 | OTP generation and validation via Redis TTL |
+| `service-verificationCode` | 8082 | Random verification code generation, used by passenger and driver APIs |
 | `service-pay` | 9001 | Alipay sandbox payment integration |
 | `service-sse-push` | 9000 | Real-time event push to clients via Server-Sent Events |
 | `internal-common` | — | Shared library — DTOs, utilities, constants (no web server) |

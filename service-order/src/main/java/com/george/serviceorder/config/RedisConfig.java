@@ -19,10 +19,13 @@ public class RedisConfig {
     @Value("${spring.redis.port}")
     private String redisPort;
 
+    @Value("${spring.redis.database}")
+    private int redisDatabase;
+
     @Bean
     public RedissonClient redissonClient(){
         Config config = new Config();
-        config.useSingleServer().setAddress(potocol+redisHost+":"+redisPort).setDatabase(0);
+        config.useSingleServer().setAddress(potocol+redisHost+":"+redisPort).setDatabase(redisDatabase);
 
         return Redisson.create(config);
 

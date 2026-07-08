@@ -23,8 +23,15 @@ import java.util.Map;
  */
 public class JwtUtils {
 
-    // private secrete code in JWT
-    private static final String CODE = "CADCGg_Sun@!!$";
+    private static final String DEFAULT_JWT_SECRET = "change-me-in-local-env";
+
+    private static String getJwtSecret() {
+        String secret = System.getenv("JWT_SECRET");
+        if (secret == null || secret.trim().isEmpty()) {
+            return DEFAULT_JWT_SECRET;
+        }
+        return secret;
+    }
 
     // the phone number of user
     private static final String KEY_PHONE = "phone";
@@ -59,7 +66,7 @@ public class JwtUtils {
 
 
         // generate token with specific algorithm
-        String token = builder.sign(Algorithm.HMAC256(CODE));
+        String token = builder.sign(Algorithm.HMAC256(getJwtSecret()));
 
         return token;
     }
@@ -71,7 +78,7 @@ public class JwtUtils {
      * @return - the decrypted message
      */
     public static TokenResult parseToken(String token) {
-        DecodedJWT verify = JWT.require(Algorithm.HMAC256(CODE)).build().verify(token);
+        DecodedJWT verify = JWT.require(Algorithm.HMAC256(getJwtSecret())).build().verify(token);
         String phone = verify.getClaim(KEY_PHONE).asString();
         String identity = verify.getClaim(KEY_IDENTITY).asString();
         TokenResult result = new TokenResult();

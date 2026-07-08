@@ -24,13 +24,19 @@ public class AlipayConfig {
 
     private String notifyUrl;
 
+    private String protocol;
+
+    private String gatewayHost;
+
+    private String signType;
+
     @PostConstruct
     public void init(){
         Config config = new Config();
         // base configuration
-        config.protocol = "https";
-        config.gatewayHost = "openapi-sandbox.dl.alipaydev.com";
-        config.signType = "RSA2";
+        config.protocol = this.protocol;
+        config.gatewayHost = this.gatewayHost;
+        config.signType = this.signType;
 
         // Service configuration
         config.appId = this.appId;

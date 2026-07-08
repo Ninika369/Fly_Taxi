@@ -5,9 +5,9 @@ spring:
   cloud:
     nacos:
       discovery:
-        password: nacos
-        username: nacos
-        server-addr: localhost:8848
+        password: "${NACOS_PASSWORD:}"
+        username: "${NACOS_USERNAME:nacos}"
+        server-addr: "${NACOS_SERVER_ADDR:localhost:8848}"
 
   application:
     name: service-verificationCode

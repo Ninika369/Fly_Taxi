@@ -3,14 +3,14 @@ spring:
     name: service-price
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/service-price?characterEncoding=utf-8&serverTimezone=GMT%2B8
-    username: root
-    password: ${DB_PASSWORD:sunhaoxian}
+    url: "${SERVICE_PRICE_DB_URL:jdbc:mysql://localhost:3306/service-price?characterEncoding=utf-8&serverTimezone=GMT%2B8}"
+    username: "${SERVICE_PRICE_DB_USERNAME:${DB_USERNAME:root}}"
+    password: "${SERVICE_PRICE_DB_PASSWORD:${DB_PASSWORD:}}"
   cloud:
     nacos:
       discovery:
-        server-addr: localhost:8848
-        username: nacos
-        password: ${NACOS_PASSWORD:nacos}
+        server-addr: "${NACOS_SERVER_ADDR:localhost:8848}"
+        username: "${NACOS_USERNAME:nacos}"
+        password: "${NACOS_PASSWORD:}"
 server:
   port: 8084

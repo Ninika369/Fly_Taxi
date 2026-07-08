@@ -4,7 +4,7 @@
 
 A backend ride-hailing platform built with **Java / Spring Boot / Spring Cloud** microservices architecture. Features real-time driver-passenger matching via SSE, dynamic pricing with versioned rules, and integrated payment processing.
 
-> **Security note:** Environment-variable-based configuration has been introduced for the currently CI-tested modules (`service-price` and `service-order`). Some other modules still use local sandbox/default values and are being externalized before container/cloud deployment.
+> **Security note:** Committed configuration uses environment-variable placeholders for datasource, Nacos, Redis, JWT, Amap, and Alipay settings. Local runtime values should be supplied through environment variables; see `.env.example`.
 
 ---
 
@@ -173,14 +173,14 @@ All 7 endpoints in service-price are documented with `@Operation` summaries, `@P
 
 ### Security — Secrets Externalization
 
-Hardcoded credentials in CI-tested modules have been replaced with environment variable placeholders:
+Secrets in committed configuration have been replaced with environment variable placeholders. Local runtime values should be supplied via environment variables:
 
 ```yaml
 # Example: service-price/application.yml
-password: ${DB_PASSWORD:sunhaoxian}    # reads from env var, falls back to dev default
+password: ${DB_PASSWORD:}
 ```
 
-This applies to database passwords, Nacos credentials, and third-party API keys in `service-price` and `service-order`. Remaining modules are scheduled for externalization before container/cloud deployment.
+This applies to datasource passwords, Nacos credentials, Redis settings, JWT signing secret, and third-party service credentials such as Amap and Alipay. See `.env.example` for the expected variable names.
 
 ---
 
@@ -234,7 +234,6 @@ mvn test -pl internal-common,service-price,service-order
 - **No input validation:** Negative distance or duration values are silently accepted, producing incorrect prices.
 
 ### Roadmap
-- [ ] Externalize remaining sandbox secrets and JWT signing key
 - [ ] Add request validation (`@Valid` / `@Positive`) for pricing endpoints
 - [ ] Docker Compose for one-command local startup
 - [ ] Single-service cloud deployment (service-price on free PaaS)

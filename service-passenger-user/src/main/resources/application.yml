@@ -6,13 +6,12 @@ spring:
     name: service-passenger-user
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/service-passenger-user?characterEncoding=utf-8&serverTimezone=GMT%2B8
-    username: root
-    password: sunhaoxian
+    url: "${SERVICE_PASSENGER_USER_DB_URL:jdbc:mysql://localhost:3306/service-passenger-user?characterEncoding=utf-8&serverTimezone=GMT%2B8}"
+    username: "${SERVICE_PASSENGER_USER_DB_USERNAME:${DB_USERNAME:root}}"
+    password: "${SERVICE_PASSENGER_USER_DB_PASSWORD:${DB_PASSWORD:}}"
   cloud:
     nacos:
       discovery:
-        server-addr: localhost:8848
-        username: nacos
-        password: nacos
-
+        server-addr: "${NACOS_SERVER_ADDR:localhost:8848}"
+        username: "${NACOS_USERNAME:nacos}"
+        password: "${NACOS_PASSWORD:}"

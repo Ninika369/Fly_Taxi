@@ -1,8 +1,8 @@
-package com.geroge.apipassenger.controller;
+package com.george.apipassenger.controller;
 
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.request.VerificationCodeDTO;
-import com.geroge.apipassenger.service.VerificationCodeService;
+import com.george.apipassenger.service.VerificationCodeService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * @Author: George Sun
  * @Date: 2024-10-12-19:08
- * @Description: com.geroge.apipassenger.controller
+ * @Description: com.george.apipassenger.controller
  */
 @RestController
 @Slf4j

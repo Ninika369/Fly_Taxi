@@ -1,9 +1,9 @@
-package com.geroge.apipassenger.service;
+package com.george.apipassenger.service;
 
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.request.PredictPriceDTO;
 import com.george.internalCommon.response.PredictPriceResponse;
-import com.geroge.apipassenger.remote.ServicePriceClient;
+import com.george.apipassenger.remote.ServicePriceClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 /**
  * @Author: George Sun
  * @Date: 2024-10-23-20:14
- * @Description: com.geroge.apipassenger.service
+ * @Description: com.george.apipassenger.service
  */
 @Service
 @Slf4j

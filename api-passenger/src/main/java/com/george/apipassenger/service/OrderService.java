@@ -1,11 +1,11 @@
-package com.geroge.apipassenger.service;
+package com.george.apipassenger.service;
 
 
 import com.george.internalCommon.constant.UserIdentity;
 import com.george.internalCommon.dto.OrderInfo;
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.request.OrderRequest;
-import com.geroge.apipassenger.remote.ServiceOrderClient;
+import com.george.apipassenger.remote.ServiceOrderClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 

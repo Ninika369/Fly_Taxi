@@ -1,4 +1,4 @@
-package com.geroge.apipassenger.interceptor;
+package com.george.apipassenger.interceptor;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -8,7 +8,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 /**
  * @Author: George Sun
  * @Date: 2024-10-19-13:40
- * @Description: com.geroge.apipassenger.interceptor
+ * @Description: com.george.apipassenger.interceptor
  */
 @Configuration
 public class InterceptorConfig implements WebMvcConfigurer {

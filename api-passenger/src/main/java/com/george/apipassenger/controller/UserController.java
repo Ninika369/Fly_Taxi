@@ -1,7 +1,7 @@
-package com.geroge.apipassenger.controller;
+package com.george.apipassenger.controller;
 
 import com.george.internalCommon.dto.ResponseResult;
-import com.geroge.apipassenger.service.UserService;
+import com.george.apipassenger.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;

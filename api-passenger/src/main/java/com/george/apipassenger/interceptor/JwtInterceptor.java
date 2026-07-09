@@ -1,4 +1,4 @@
-package com.geroge.apipassenger.interceptor;
+package com.george.apipassenger.interceptor;
 
 import com.auth0.jwt.exceptions.AlgorithmMismatchException;
 import com.auth0.jwt.exceptions.SignatureVerificationException;

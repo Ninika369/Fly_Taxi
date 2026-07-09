@@ -47,6 +47,9 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class OrderInfoService {
 
+    private static final int MAX_DISPATCH_ATTEMPTS = 6;
+    private static final long DISPATCH_RETRY_DELAY_MS = TimeUnit.SECONDS.toMillis(20);
+
     // the mapper to interact with orderInfo database
     @Autowired
     OrderInfoMapper orderInfoMapper;
@@ -127,23 +130,24 @@ public class OrderInfoService {
 
         orderInfoMapper.insert(orderInfo);
 
-        // Processing scheduled tasks (totally try 6 times in 2 minutes)
-        for (int i =0;i<6;i++){
+        // Retry real-time dispatch up to 6 times, waiting 20 seconds between failed attempts.
+        for (int i =0;i<MAX_DISPATCH_ATTEMPTS;i++){
             // Dispatch real-time order
             int result = dispatchRealTimeOrder(orderInfo);
             if (result == 1){
                 break;
             }
-            if (i == 5){
+            if (i == MAX_DISPATCH_ATTEMPTS - 1){
                 // If there is no available driver, the order is invalid
                 orderInfo.setOrderStatus(OrderConstant.ORDER_INVALID);
                 orderInfoMapper.updateById(orderInfo);
             }else {
                 // wait for 20s
                 try {
-                    Thread.sleep(2);
+                    Thread.sleep(DISPATCH_RETRY_DELAY_MS);
                 } catch (InterruptedException e) {
-                    e.printStackTrace();
+                    Thread.currentThread().interrupt();
+                    return ResponseResult.fail(CommonStatus.FAIL.getCode(), "Dispatch retry interrupted");
                 }
             }
 
@@ -217,76 +221,80 @@ public class OrderInfoService {
 
 
                     // This lock is to prevent multiple threads from ordering the same driver
-                    String lockKey = (driverId+"").intern();
+                    String lockKey = "driver:assignment:" + driverId;
                     RLock lock = redissonClient.getLock(lockKey);
                     lock.lock();
+                    try {
 
-                    // Determine if the driver has an order in progress
-                    if (isDriverOrderGoingon(driverId)){
-                        lock.unlock();
-                        continue ;
+                        // Determine if the driver has an order in progress
+                        if (isDriverOrderGoingon(driverId)){
+                            continue ;
+                        }
+
+
+                        // Set information about the order and the driver's vehicle
+                        orderInfo.setDriverId(driverId);
+                        orderInfo.setDriverPhone(driverPhone);
+                        orderInfo.setCarId(carId);
+                        orderInfo.setReceiveOrderCarLongitude(longitude);
+                        orderInfo.setReceiveOrderCarLatitude(latitude);
+                        orderInfo.setReceiveOrderTime(LocalDateTime.now());
+                        orderInfo.setLicenseId(licenseId);
+                        orderInfo.setVehicleNo(vehicleNo);
+                        orderInfo.setOrderStatus(OrderConstant.DRIVER_RECEIVE_ORDER);
+
+                        orderInfoMapper.updateById(orderInfo);
+
+                        // Notify the driver
+                        JSONObject driverContent = new JSONObject();
+                        driverContent.put("orderId",orderInfo.getId());
+                        driverContent.put("passengerId",orderInfo.getPassengerId());
+                        driverContent.put("passengerPhone",orderInfo.getPassengerPhone());
+                        driverContent.put("departure",orderInfo.getDeparture());
+                        driverContent.put("depLongitude",orderInfo.getDepLongitude());
+                        driverContent.put("depLatitude",orderInfo.getDepLatitude());
+                        driverContent.put("destination",orderInfo.getDestination());
+                        driverContent.put("destLongitude",orderInfo.getDestLongitude());
+                        driverContent.put("destLatitude",orderInfo.getDestLatitude());
+                        PushRequest pushRequest = new PushRequest();
+                        pushRequest.setUserId(driverId);
+                        pushRequest.setIdentity(UserIdentity.DRIVER.getIdentity());
+                        pushRequest.setContent(driverContent.toString());
+                        serviceSsePushClient.push(pushRequest);
+
+                        // Notify the passenger
+                        JSONObject passengerContent = new  JSONObject();
+                        passengerContent.put("orderId",orderInfo.getId());
+                        passengerContent.put("driverId",orderInfo.getDriverId());
+                        passengerContent.put("driverPhone",orderInfo.getDriverPhone());
+                        passengerContent.put("vehicleNo",orderInfo.getVehicleNo());
+
+                        // Get vehicle information, calling vehicle service
+                        ResponseResult<Car> carById = serviceDriverUserClient.getCarById(carId);
+                        Car carRemote = carById.getData();
+
+                        passengerContent.put("brand", carRemote.getBrand());
+                        passengerContent.put("model",carRemote.getModel());
+                        passengerContent.put("vehicleColor",carRemote.getVehicleColor());
+
+                        passengerContent.put("receiveOrderCarLongitude",orderInfo.getReceiveOrderCarLongitude());
+                        passengerContent.put("receiveOrderCarLatitude",orderInfo.getReceiveOrderCarLatitude());
+
+                        PushRequest pushRequest1 = new PushRequest();
+                        pushRequest1.setUserId(orderInfo.getPassengerId());
+                        pushRequest1.setIdentity(UserIdentity.PASSENGER.getIdentity());
+                        pushRequest1.setContent(passengerContent.toString());
+
+                        serviceSsePushClient.push(pushRequest1);
+                        result = 1;
+
+                        // Exit, no more driver search，if the order is sent successfully
+                        break radius;
+                    } finally {
+                        if (lock.isHeldByCurrentThread()) {
+                            lock.unlock();
+                        }
                     }
-
-
-                    // Set information about the order and the driver's vehicle
-                    orderInfo.setDriverId(driverId);
-                    orderInfo.setDriverPhone(driverPhone);
-                    orderInfo.setCarId(carId);
-                    orderInfo.setReceiveOrderCarLongitude(longitude);
-                    orderInfo.setReceiveOrderCarLatitude(latitude);
-                    orderInfo.setReceiveOrderTime(LocalDateTime.now());
-                    orderInfo.setLicenseId(licenseId);
-                    orderInfo.setVehicleNo(vehicleNo);
-                    orderInfo.setOrderStatus(OrderConstant.DRIVER_RECEIVE_ORDER);
-
-                    orderInfoMapper.updateById(orderInfo);
-
-                    // Notify the driver
-                    JSONObject driverContent = new JSONObject();
-                    driverContent.put("orderId",orderInfo.getId());
-                    driverContent.put("passengerId",orderInfo.getPassengerId());
-                    driverContent.put("passengerPhone",orderInfo.getPassengerPhone());
-                    driverContent.put("departure",orderInfo.getDeparture());
-                    driverContent.put("depLongitude",orderInfo.getDepLongitude());
-                    driverContent.put("depLatitude",orderInfo.getDepLatitude());
-                    driverContent.put("destination",orderInfo.getDestination());
-                    driverContent.put("destLongitude",orderInfo.getDestLongitude());
-                    driverContent.put("destLatitude",orderInfo.getDestLatitude());
-                    PushRequest pushRequest = new PushRequest();
-                    pushRequest.setUserId(driverId);
-                    pushRequest.setIdentity(UserIdentity.DRIVER.getIdentity());
-                    pushRequest.setContent(driverContent.toString());
-                    serviceSsePushClient.push(pushRequest);
-
-                    // Notify the passenger
-                    JSONObject passengerContent = new  JSONObject();
-                    passengerContent.put("orderId",orderInfo.getId());
-                    passengerContent.put("driverId",orderInfo.getDriverId());
-                    passengerContent.put("driverPhone",orderInfo.getDriverPhone());
-                    passengerContent.put("vehicleNo",orderInfo.getVehicleNo());
-
-                    // Get vehicle information, calling vehicle service
-                    ResponseResult<Car> carById = serviceDriverUserClient.getCarById(carId);
-                    Car carRemote = carById.getData();
-
-                    passengerContent.put("brand", carRemote.getBrand());
-                    passengerContent.put("model",carRemote.getModel());
-                    passengerContent.put("vehicleColor",carRemote.getVehicleColor());
-
-                    passengerContent.put("receiveOrderCarLongitude",orderInfo.getReceiveOrderCarLongitude());
-                    passengerContent.put("receiveOrderCarLatitude",orderInfo.getReceiveOrderCarLatitude());
-
-                    PushRequest pushRequest1 = new PushRequest();
-                    pushRequest1.setUserId(orderInfo.getPassengerId());
-                    pushRequest1.setIdentity(UserIdentity.PASSENGER.getIdentity());
-                    pushRequest1.setContent(passengerContent.toString());
-
-                    serviceSsePushClient.push(pushRequest1);
-                    result = 1;
-                    lock.unlock();
-
-                    // Exit, no more driver search，if the order is sent successfully
-                    break radius;
                 }
 
             }

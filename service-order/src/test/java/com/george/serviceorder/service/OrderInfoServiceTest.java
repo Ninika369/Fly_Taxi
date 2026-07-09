@@ -5,12 +5,19 @@ import com.george.internalCommon.constant.OrderConstant;
 import com.george.internalCommon.constant.UserIdentity;
 import com.george.internalCommon.dto.OrderInfo;
 import com.george.internalCommon.dto.ResponseResult;
+import com.george.internalCommon.response.OrderDriverResponse;
+import com.george.internalCommon.response.TerminalResponse;
 import com.george.serviceorder.mapper.OrderInfoMapper;
+import com.george.serviceorder.remote.ServiceDriverUserClient;
+import com.george.serviceorder.remote.ServiceMapClient;
+import com.george.serviceorder.remote.ServiceSsePushClient;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 
 // ---- Mockito imports ----
 import org.mockito.InjectMocks;    // Tells Mockito: "create this object and inject mocks into it"
@@ -21,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;   // when(), verify(), any(), etc.
 
 import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Unit tests for {@link OrderInfoService#cancel(Long, String)}.
@@ -40,6 +49,21 @@ class OrderInfoServiceTest {
     // it won't hit a real database. Instead, it returns whatever we tell it to.
     @Mock
     OrderInfoMapper orderInfoMapper;
+
+    @Mock
+    ServiceMapClient serviceMapClient;
+
+    @Mock
+    ServiceDriverUserClient serviceDriverUserClient;
+
+    @Mock
+    ServiceSsePushClient serviceSsePushClient;
+
+    @Mock
+    RedissonClient redissonClient;
+
+    @Mock
+    RLock lock;
 
     // The REAL service — but with the fake mapper injected into it.
     // Mockito sees the @Autowired OrderInfoMapper field inside OrderInfoService
@@ -72,6 +96,43 @@ class OrderInfoServiceTest {
         orderInfo.setOrderStatus(OrderConstant.DRIVER_RECEIVE_ORDER);
         orderInfo.setReceiveOrderTime(LocalDateTime.now().minusMinutes(minutesAgo));
         when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(orderInfo);
+    }
+
+    private OrderInfo dispatchOrder() {
+        OrderInfo dispatchOrder = new OrderInfo();
+        dispatchOrder.setId(ORDER_ID);
+        dispatchOrder.setPassengerId(10L);
+        dispatchOrder.setPassengerPhone("13300000000");
+        dispatchOrder.setDeparture("A");
+        dispatchOrder.setDepLongitude("174.7633");
+        dispatchOrder.setDepLatitude("-36.8485");
+        dispatchOrder.setDestination("B");
+        dispatchOrder.setDestLongitude("174.7762");
+        dispatchOrder.setDestLatitude("-36.8519");
+        dispatchOrder.setVehicleType("SUV");
+        return dispatchOrder;
+    }
+
+    private TerminalResponse terminal(Long carId) {
+        TerminalResponse terminalResponse = new TerminalResponse();
+        terminalResponse.setCarId(carId);
+        terminalResponse.setLongitude("174.7700");
+        terminalResponse.setLatitude("-36.8500");
+        return terminalResponse;
+    }
+
+    private OrderDriverResponse driver(Long driverId, String vehicleType) {
+        OrderDriverResponse driverResponse = new OrderDriverResponse();
+        driverResponse.setDriverId(driverId);
+        driverResponse.setDriverPhone("15500000000");
+        driverResponse.setLicenseId("NZL-001");
+        driverResponse.setVehicleNo("ABC123");
+        driverResponse.setVehicleType(vehicleType);
+        return driverResponse;
+    }
+
+    private ResponseResult<List<TerminalResponse>> terminalSearchResult(List<TerminalResponse> terminals) {
+        return ResponseResult.success(terminals);
     }
 
     // ======================== Passenger cancellation ========================
@@ -269,5 +330,55 @@ class OrderInfoServiceTest {
 
         // verify with never(): "updateById should NOT have been called"
         verify(orderInfoMapper, never()).updateById(any());
+    }
+
+    // ======================== Dispatch lock safety ========================
+
+    @Test
+    @DisplayName("Dispatch releases driver lock when driver already has ongoing order")
+    void should_unlock_when_driverAlreadyHasOngoingOrder() {
+        OrderInfo dispatchOrder = dispatchOrder();
+        Long carId = 300L;
+        Long driverId = 200L;
+
+        when(serviceMapClient.terminalAroundSearch(anyString(), anyInt()))
+                .thenReturn(terminalSearchResult(Collections.singletonList(terminal(carId))))
+                .thenReturn(terminalSearchResult(Collections.emptyList()))
+                .thenReturn(terminalSearchResult(Collections.emptyList()));
+        when(serviceDriverUserClient.getAvailableDriver(carId)).thenReturn(ResponseResult.success(driver(driverId, "SUV")));
+        when(redissonClient.getLock("driver:assignment:" + driverId)).thenReturn(lock);
+        when(orderInfoMapper.selectCount(any())).thenReturn(1);
+        when(lock.isHeldByCurrentThread()).thenReturn(true);
+
+        int result = orderInfoService.dispatchRealTimeOrder(dispatchOrder);
+
+        assertEquals(0, result);
+        verify(lock).lock();
+        verify(lock).unlock();
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verify(serviceSsePushClient, never()).push(any());
+    }
+
+    @Test
+    @DisplayName("Dispatch releases driver lock when downstream call throws after lock acquisition")
+    void should_unlock_when_downstreamCallThrowsAfterLockAcquired() {
+        OrderInfo dispatchOrder = dispatchOrder();
+        Long carId = 300L;
+        Long driverId = 200L;
+
+        when(serviceMapClient.terminalAroundSearch(anyString(), anyInt()))
+                .thenReturn(terminalSearchResult(Collections.singletonList(terminal(carId))));
+        when(serviceDriverUserClient.getAvailableDriver(carId)).thenReturn(ResponseResult.success(driver(driverId, "SUV")));
+        when(redissonClient.getLock("driver:assignment:" + driverId)).thenReturn(lock);
+        when(orderInfoMapper.selectCount(any())).thenReturn(0);
+        when(lock.isHeldByCurrentThread()).thenReturn(true);
+        when(serviceSsePushClient.push(any())).thenReturn("ok");
+        when(serviceDriverUserClient.getCarById(carId)).thenThrow(new RuntimeException("car lookup failed"));
+
+        assertThrows(RuntimeException.class, () -> orderInfoService.dispatchRealTimeOrder(dispatchOrder));
+
+        verify(lock).lock();
+        verify(lock).unlock();
+        verify(orderInfoMapper).updateById(dispatchOrder);
     }
 }

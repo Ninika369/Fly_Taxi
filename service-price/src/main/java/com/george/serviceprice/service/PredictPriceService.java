@@ -123,6 +123,22 @@ public class PredictPriceService {
      * @return
      */
    public double calculatePrice(Integer distance, Integer duration, PriceRule rule) {
+       if (distance == null) {
+           throw new IllegalArgumentException("distance must not be null");
+       }
+       if (duration == null) {
+           throw new IllegalArgumentException("duration must not be null");
+       }
+       if (rule == null) {
+           throw new IllegalArgumentException("price rule must not be null");
+       }
+       if (distance < 0) {
+           throw new IllegalArgumentException("distance must be non-negative");
+       }
+       if (duration < 0) {
+           throw new IllegalArgumentException("duration must be non-negative");
+       }
+
        double result = 0.0;
 
        // get the starting fare

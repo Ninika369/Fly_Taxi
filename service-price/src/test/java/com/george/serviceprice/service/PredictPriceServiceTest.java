@@ -305,28 +305,47 @@ class PredictPriceServiceTest {
     // ======================== Negative input defense ========================
 
     @Test
-    @DisplayName("Negative duration produces reduced price — no input validation exists")
-    void should_reducePrice_when_durationIsNegative() {
-        // Current code does NOT validate inputs.
-        // Negative duration -> negative timeInMinutes -> negative timeFee
-        // This means the total can be LESS than startFare, which is a bug.
-        //
-        // distance=0, duration=-600 (negative 10 minutes)
-        // timeInMinutes = divide(-600, 60) -- but wait, divide() takes int,
-        //   and the method signature is divide(int v1, int v2).
-        //   -600 / 60: v2=60 > 0, so no exception.
-        //   Result = -10.00
-        // timeFee = -10.00 * 0.5 = -5.00
-        // total = 10.00 + 0.00 + (-5.00) = 5.00
-        //
-        // This documents that negative duration SILENTLY reduces the fare.
-        // A future fix should add input validation to reject negative values.
+    @DisplayName("Negative duration is rejected")
+    void should_throwIllegalArgumentException_when_durationIsNegative() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> priceService.calculatePrice(0, -600, standardRule));
 
-        double price = priceService.calculatePrice(0, -600, standardRule);
+        assertEquals("duration must be non-negative", exception.getMessage());
+    }
 
-        // Characterization: price is startFare MINUS time fee = 10.0 - 5.0 = 5.0
-        // This is clearly wrong business behavior, but it's what the code does today.
-        assertEquals(5.0, price, 1e-10,
-                "Negative duration reduces fare — this is a known gap in input validation");
+    @Test
+    @DisplayName("Negative distance is rejected")
+    void should_throwIllegalArgumentException_when_distanceIsNegative() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> priceService.calculatePrice(-1, 0, standardRule));
+
+        assertEquals("distance must be non-negative", exception.getMessage());
+    }
+
+    @Test
+    @DisplayName("Null distance is rejected")
+    void should_throwIllegalArgumentException_when_distanceIsNull() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> priceService.calculatePrice(null, 0, standardRule));
+
+        assertEquals("distance must not be null", exception.getMessage());
+    }
+
+    @Test
+    @DisplayName("Null duration is rejected")
+    void should_throwIllegalArgumentException_when_durationIsNull() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> priceService.calculatePrice(0, null, standardRule));
+
+        assertEquals("duration must not be null", exception.getMessage());
+    }
+
+    @Test
+    @DisplayName("Null price rule is rejected")
+    void should_throwIllegalArgumentException_when_priceRuleIsNull() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> priceService.calculatePrice(0, 0, null));
+
+        assertEquals("price rule must not be null", exception.getMessage());
     }
 }

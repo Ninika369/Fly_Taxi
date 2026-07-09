@@ -24,7 +24,7 @@ public class MapDicDistrictClient {
 
     public String dicDistrict(String keywords) {
 
-        // key=<用户的key>
+        // key=<user key>
         // create a url for visiting
         StringBuilder url = new StringBuilder();
         url.append(AmapConfigConstant.DISTRICT_URL);

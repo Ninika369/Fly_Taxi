@@ -8,7 +8,6 @@ import com.auth0.jwt.exceptions.SignatureVerificationException;
 import com.auth0.jwt.exceptions.TokenExpiredException;
 import com.auth0.jwt.interfaces.Claim;
 import com.auth0.jwt.interfaces.DecodedJWT;
-import com.george.internalCommon.constant.UserIdentity;
 import com.george.internalCommon.dto.TokenResult;
 
 import java.util.Calendar;
@@ -100,14 +99,6 @@ public class JwtUtils {
         catch (Exception e) {
         }
         return res;
-    }
-
-    public static void main(String[] args) {
-        String token = generateToken("13304268325", "1", "accessToken");
-        System.out.println("token is: " + token);
-        TokenResult result = parseToken(token);
-        System.out.println("decrypted message is: " + result.getPhone() + " | " + result.getIdentity());
-        System.out.println(UserIdentity.PASSENGER.getIdentity());
     }
 
 }

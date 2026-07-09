@@ -4,6 +4,7 @@ import com.george.internalCommon.dto.OrderInfo;
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.serviceorder.mapper.OrderInfoMapper;
 import com.george.serviceorder.service.OrderInfoService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
  * @Description: com.example.serviceorder.controller
  */
 @RestController
+@Slf4j
 public class TestController {
     @Autowired
     OrderInfoService service;
@@ -43,7 +45,7 @@ public class TestController {
      */
     @GetMapping("/test-real-time-order/{orderId}")
     public String dispatchRealTimeOrder(@PathVariable("orderId") long orderId){
-        System.out.println("service-order 端口："+ port+" 并发测试：orderId："+orderId);
+        log.info("Dispatch test request received in service-order on port {}, orderId={}", port, orderId);
         OrderInfo orderInfo = orderInfoMapper.selectById(orderId);
         service.dispatchRealTimeOrder(orderInfo);
         return "test-real-time-order   success";

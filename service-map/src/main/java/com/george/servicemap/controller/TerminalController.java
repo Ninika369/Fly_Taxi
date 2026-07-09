@@ -20,7 +20,7 @@ public class TerminalController {
     private TerminalService terminalService;
 
     /**
-     * 添加终端
+     * Add a terminal.
      * @param name
      * @param desc
      * @return
@@ -31,7 +31,7 @@ public class TerminalController {
     }
 
     /**
-     * 终端搜索
+     * Search terminals around the center point.
      * @param center
      * @param radius
      * @return
@@ -43,7 +43,7 @@ public class TerminalController {
     }
 
     /**
-     * 轨迹查询
+     * Search terminal traces.
      * @param tid
      * @param starttime
      * @param endtime

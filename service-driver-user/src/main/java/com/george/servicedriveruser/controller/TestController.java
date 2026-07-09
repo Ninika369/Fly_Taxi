@@ -27,7 +27,7 @@ public class TestController {
 //    }
 
 
-    // 测试mapper中的xml是否正常使用
+    // Test whether mapper XML is wired correctly.
     @Autowired
     DriverUserMapper driverUserMapper;
 

@@ -6,6 +6,7 @@ import com.george.internalCommon.dto.DicDistrict;
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.servicemap.mapper.DicDistrictMapper;
 import com.george.servicemap.remote.MapDicDistrictClient;
+import lombok.extern.slf4j.Slf4j;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service;
  * @Description: This class is used to provide functionality to extract dictionary of district
  */
 @Service
+@Slf4j
 public class DictDistrictService {
 
     /**
@@ -37,7 +39,7 @@ public class DictDistrictService {
     public ResponseResult initDicDistrict(String keywords) {
 
         String dicDistrictResult = client.dicDistrict(keywords);
-        System.out.println(dicDistrictResult);
+        log.debug("Amap district response: {}", dicDistrictResult);
         // interpret the result json object
         JSONObject dicDistrictJsonObject = new JSONObject(dicDistrictResult);
         int status = dicDistrictJsonObject.getInt(AmapConfigConstant.STATUS);

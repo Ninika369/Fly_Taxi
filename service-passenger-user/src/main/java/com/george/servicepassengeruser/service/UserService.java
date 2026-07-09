@@ -39,7 +39,7 @@ public class UserService {
         // check whether current user exists in database
         if (passengerUsers.isEmpty()) {
             PassengerUser user = new PassengerUser();
-            user.setPassengerName("张悦");
+            user.setPassengerName("New Passenger");
             // 0 means female; 1 means male
             user.setPassengerGender((byte) 0);
             user.setPassengerPhone(passengerPhone);

@@ -44,7 +44,7 @@ public class VerificationCodeController {
         String driverPhone = verificationCodeDTO.getDriverPhone();
         String verificationCode = verificationCodeDTO.getVerificationCode();
 
-        System.out.println("Number: "+driverPhone+", VC："+verificationCode);
+        log.debug("Checking driver verification code");
 
         return verificationCodeService.checkCode(driverPhone,verificationCode);
     }

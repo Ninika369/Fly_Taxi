@@ -3,6 +3,7 @@ package com.geroge.apipassenger.controller;
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.request.VerificationCodeDTO;
 import com.geroge.apipassenger.service.VerificationCodeService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
  * @Description: com.geroge.apipassenger.controller
  */
 @RestController
+@Slf4j
 public class VerificationCodeController {
 
     @Autowired
@@ -24,9 +26,8 @@ public class VerificationCodeController {
 
     @GetMapping("/verification-code")
     public ResponseResult verificationCode(@RequestBody VerificationCodeDTO codeDTO) {
-        System.out.println("-----");
         String phone = codeDTO.getPassengerPhone();
-        System.out.println("phone number is: " + phone);
+        log.debug("Passenger verification code requested");
         return service.generateCode(phone);
     }
 
@@ -34,8 +35,7 @@ public class VerificationCodeController {
     public ResponseResult checkVerificationCode(@RequestBody VerificationCodeDTO codeDTO) {
         String passengerPhone = codeDTO.getPassengerPhone();
         String verificationCode = codeDTO.getVerificationCode();
-        System.out.println("phone number: " + passengerPhone);
-        System.out.println("code: " + verificationCode);
+        log.debug("Checking passenger verification code");
         return service.checkCode(passengerPhone, verificationCode);
     }
 }

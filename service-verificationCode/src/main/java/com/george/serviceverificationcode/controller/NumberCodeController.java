@@ -23,7 +23,6 @@ public class NumberCodeController {
         double random = (Math.random()*9 + 1);
         // extract the first size number and set them as verification code
         int code = (int)(Math.pow(10, size - 1) * random);
-        System.out.println("Generated code: " + code);
 
 
         // define a return value

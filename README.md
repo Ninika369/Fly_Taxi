@@ -12,7 +12,7 @@ A backend ride-hailing platform built with **Java / Spring Boot / Spring Cloud**
 
 **Backend:** Java 8, Spring Boot 2.4, Spring Cloud, MyBatis-Plus, OpenFeign
 
-**Infrastructure:** MySQL, Redis, Nacos (service discovery & config)
+**Infrastructure:** MySQL, Redis + Redisson (distributed locks), Nacos (service discovery)
 
 **API Edge:** api-passenger, api-driver, api-boss (Spring Boot API entry modules with JWT authentication)
 
@@ -79,7 +79,7 @@ flowchart LR
 ```
 
 **Shared platform notes:**
-- All Spring Boot modules register with **Nacos** for service discovery and configuration.
+- All Spring Boot modules register with **Nacos** for service discovery.
 - `internal-common` is a shared library used across all modules for DTOs, constants, and utility classes.
 - MySQL-backed services include `service-price`, `service-order`, `service-driver-user`, `service-passenger-user`, and `service-map`.
 - Redis is used in `api-passenger`, `api-driver`, and `service-order` for token/code storage, blacklist checks, and coordination-related runtime state.
@@ -153,7 +153,7 @@ During testing, we discovered a **half-cent rounding bug** in the pricing calcul
 
 ### CI/CD — GitHub Actions
 
-Every push to `master` triggers automated testing:
+Every pull request targeting `master` and every push to `master` triggers automated testing:
 
 1. **Build** — `mvn clean install -DskipTests` (compile all 12 modules)
 2. **Test** — `mvn test -pl internal-common,service-price,service-order` (run 54 targeted unit tests)
@@ -210,16 +210,22 @@ cd Fly_Taxi
 # Build all modules
 mvn clean install -DskipTests
 
-# Run unit tests (no MySQL/Redis/Nacos required)
+# Run all repository tests (pure unit tests, no infrastructure needed)
+mvn test
+
+# Or run only the CI-targeted modules
 mvn test -pl internal-common,service-price,service-order
 ```
 
 ### Running the Services
 
+0. Copy `.env.example` values into your local environment, or export the required variables manually. Never commit local secret files.
 1. Start MySQL and create databases: `service-price`, `service-order`, `service-driver-user`, `service-map`, `service-passenger-user`
 2. Start Redis on default port (6379)
 3. Start Nacos in standalone mode
 4. Launch services individually via IDE or `mvn spring-boot:run` in each module directory
+
+For `service-order`, activate a port profile when running locally, for example `--spring.profiles.active=8089`. A second profile, `8090`, is available if you want to run two `service-order` instances for a Nacos/OpenFeign load-balancing demo.
 
 ---
 
@@ -229,9 +235,11 @@ mvn test -pl internal-common,service-price,service-order
 - **Intermediate rounding:** `BigDecimalUtils.divide()` rounds to 2 decimal places at each step, causing 995m–1004m to all resolve as 1.00km. Characterization tests are in place; fix planned to defer rounding to the final calculation step.
 - **Cancel threshold readability:** `ChronoUnit.MINUTES.between() > 1` effectively means ≥ 2 minutes due to truncation. Semantically clearer as `>= 2`.
 - **Variable naming:** `distanceMiles` / `startMile` should be `distanceKm` / `startKm` to reflect actual units.
+- **SSE emitter registry thread safety:** `service-sse-push` currently stores `SseEmitter` instances in a static `HashMap` without completion, timeout, or error lifecycle callbacks. Planned fix: use `ConcurrentHashMap` with lifecycle-based cleanup.
 
 ### Roadmap
 - [ ] Add request validation (`@Valid` / `@Positive`) for pricing endpoints
+- [ ] Replace blocking dispatch retry (`Thread.sleep`) with an async scheduler or delayed queue
 - [ ] Docker Compose for one-command local startup
 - [ ] Single-service cloud deployment (service-price on free PaaS)
 - [ ] Actuator /health endpoint for observability

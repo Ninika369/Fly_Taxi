@@ -186,7 +186,7 @@ public class OrderInfoService {
             Integer radius = radiusList.get(i);
             listResponseResult = serviceMapClient.terminalAroundSearch(center,radius );
 
-            log.info("在半径为"+radius+"的范围内，寻找车辆,结果："+ new JSONArray(listResponseResult.getData()).toString());
+            log.info("Searching for vehicles within {} meters, result: {}", radius, new JSONArray(listResponseResult.getData()).toString());
 
             // analyze the terminal
             List<TerminalResponse> data = listResponseResult.getData();
@@ -288,7 +288,7 @@ public class OrderInfoService {
                         serviceSsePushClient.push(pushRequest1);
                         result = 1;
 
-                        // Exit, no more driver search，if the order is sent successfully
+                        // Exit, no more driver search, if the order is sent successfully
                         break radius;
                     } finally {
                         if (lock.isHeldByCurrentThread()) {

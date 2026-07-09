@@ -3,6 +3,7 @@ package com.george.servicepay.config;
 import com.alipay.easysdk.factory.Factory;
 import com.alipay.easysdk.kernel.Config;
 import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -14,6 +15,7 @@ import javax.annotation.PostConstruct;
 @Component
 @ConfigurationProperties(prefix = "alipay")
 @Data
+@Slf4j
 public class AlipayConfig {
 
     private String appId;
@@ -45,7 +47,7 @@ public class AlipayConfig {
         config.notifyUrl = this.notifyUrl;
 
         Factory.setOptions(config);
-        System.out.println("The Alipay configuration initialization is complete!");
+        log.info("Alipay configuration initialization is complete");
     }
 
 

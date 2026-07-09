@@ -33,7 +33,7 @@ public class PointService {
         // obtain carId
         Long carId = apiDriverPointRequest.getCarId();
 
-        // get tid and trid by carid，using the interface of service-driver-user
+        // get tid and trid by carid, using the interface of service-driver-user
         ResponseResult<Car> carById = serviceDriverUserClient.getCarById(carId);
         Car car = carById.getData();
         String tid = car.getTid();

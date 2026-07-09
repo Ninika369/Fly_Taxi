@@ -75,7 +75,6 @@ public class VerificationCodeService {
 
         // attempt to extract value from Redis
         String redisValue = redisTemplate.opsForValue().get(key);
-        System.out.println("value in redis: " +  redisValue);
 
         // according to the phone number. check the correctness of vc
         if (StringUtils.isBlank(redisValue) || !redisValue.trim().equals(verificationCode.trim())) {

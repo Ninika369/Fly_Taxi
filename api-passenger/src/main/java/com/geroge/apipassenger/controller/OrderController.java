@@ -9,6 +9,7 @@ import com.george.internalCommon.dto.TokenResult;
 import com.george.internalCommon.request.OrderRequest;
 import com.george.internalCommon.util.JwtUtils;
 import com.geroge.apipassenger.service.OrderService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
  */
 @RestController
 @RequestMapping("/order")
+@Slf4j
 public class OrderController {
 
     @Autowired
@@ -28,7 +30,7 @@ public class OrderController {
      */
     @PostMapping("/add")
     public ResponseResult add(@RequestBody OrderRequest orderRequest){
-        System.out.println(orderRequest);
+        log.debug("Passenger order add request received");
         return orderService.add(orderRequest);
     }
 

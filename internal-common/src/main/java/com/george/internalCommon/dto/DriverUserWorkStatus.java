@@ -23,7 +23,7 @@ public class DriverUserWorkStatus implements Serializable {
     private Long driverId;
 
     /**
-     * STOP：0；START：1; SUSPEND：2
+     * STOP: 0; START: 1; SUSPEND: 2
      */
     private Integer workStatus;
 

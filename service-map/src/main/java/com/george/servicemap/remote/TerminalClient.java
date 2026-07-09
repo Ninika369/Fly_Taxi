@@ -5,6 +5,7 @@ import com.george.internalCommon.constant.AmapConfigConstant;
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.response.TerminalResponse;
 import com.george.internalCommon.response.TrsearchResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +21,7 @@ import java.util.List;
  * This class is to deal with the terminal in a service, a terminal meaning a vehicle
  */
 @Service
+@Slf4j
 public class TerminalClient {
 
     @Value("${amap.key}")
@@ -144,9 +146,9 @@ public class TerminalClient {
         url.append("&");
         url.append("endtime="+endtime);
 
-        System.out.println("高德地图查询轨迹结果请求："+url.toString());
+        log.debug("Requesting Amap trace search for tid={}, starttime={}, endtime={}", tid, starttime, endtime);
         ResponseEntity<String> forEntity = restTemplate.getForEntity(url.toString(), String.class);
-        System.out.println("高德地图查询轨迹结果响应："+forEntity.getBody());
+        log.debug("Amap trace search response: {}", forEntity.getBody());
 
         JSONObject result = new JSONObject(forEntity.getBody());
         JSONObject data = result.getJSONObject("data");

@@ -74,7 +74,7 @@ public class UserController {
     }
 
     /**
-     * 根据车辆Id查询订单需要的司机信息
+     * Query driver information needed for an order by vehicle id.
      * @param carId
      * @return
      */
@@ -87,7 +87,7 @@ public class UserController {
     DriverCarBindingRelationshipService driverCarBindingRelationshipService;
 
     /**
-     * 根据司机手机号查询司机和车辆绑定关系
+     * Query the driver and vehicle binding relationship by driver phone number.
      * @param driverPhone
      * @return
      */

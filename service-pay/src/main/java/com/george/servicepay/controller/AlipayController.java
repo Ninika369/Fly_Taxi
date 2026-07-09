@@ -4,6 +4,7 @@ import com.alipay.easysdk.factory.Factory;
 import com.alipay.easysdk.payment.page.models.AlipayTradePagePayResponse;
 
 import com.george.servicepay.service.AlipayService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,6 +22,7 @@ import java.util.Map;
 @RequestMapping("/alipay")
 @Controller
 @ResponseBody
+@Slf4j
 public class AlipayController {
 
     /**
@@ -36,7 +38,7 @@ public class AlipayController {
         try {
             response = Factory.Payment.Page().pay(subject, outTradeNo, totalAmount,"");
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Failed to create Alipay payment page", e);
             throw new RuntimeException();
         }
         return response.getBody();
@@ -71,7 +73,7 @@ public class AlipayController {
                 alipayService.pay(orderId);
 
             }else {
-                System.out.println("Alipay verification does not pass!");
+                log.warn("Alipay notification verification failed");
             }
 
         }

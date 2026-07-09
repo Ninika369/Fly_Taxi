@@ -48,15 +48,15 @@ public class VerificationCodeService {
         if (ifExists == DriverCarConstant.DRIVER_NOT_EXISTS){
             return ResponseResult.fail(CommonStatus.DRIVER_NOT_EXISTS.getCode(),CommonStatus.DRIVER_NOT_EXISTS.getMessage());
         }
-        log.info(driverPhone+" 的司机存在");
+        log.info("Driver account exists for verification code request");
         // get VC
         ResponseResult<DataResponse> numberCodeResult = serviceVerificationcodeClient.getNumberCode(6);
         DataResponse numberCodeResponse = numberCodeResult.getData();
         int verificationCode = numberCodeResponse.getNumberCode();
-        log.info("验证码: "+verificationCode);
+        log.debug("Generated driver verification code");
         // Call third party to generate verification code, third party: Ali SMS service, Tencent, Huaxin, Ronglian
 
-        // store in reids。1：key，2：存入value
+        // Store verification code in Redis with the generated key and value.
         String key = RedisPrefixUtils.generateKey(driverPhone, UserIdentity.DRIVER.getIdentity());
         stringRedisTemplate.opsForValue().set(key, verificationCode+"", 2, TimeUnit.MINUTES);
 
@@ -77,7 +77,7 @@ public class VerificationCodeService {
         String key = RedisPrefixUtils.generateKey(driverPhone,UserIdentity.DRIVER.getIdentity());
         // get value
         String codeRedis = stringRedisTemplate.opsForValue().get(key);
-        System.out.println("redis中的value："+codeRedis);
+        log.debug("Loaded driver verification code from Redis");
 
         // check verification code
         if (codeRedis.equals("") || codeRedis == null) {

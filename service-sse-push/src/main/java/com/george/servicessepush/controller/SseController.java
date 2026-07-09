@@ -59,10 +59,10 @@ public class SseController {
             }
 
         } catch (IOException e) {
-            e.printStackTrace();
+            log.warn("Failed to send SSE message for key {}", sseMapKey, e);
         }
 
-        return "To the user："+sseMapKey+", sent a message："+content;
+        return "To the user: " + sseMapKey + ", sent a message: " + content;
     }
 
     /**
@@ -74,7 +74,7 @@ public class SseController {
     @GetMapping("/close")
     public String close(@RequestParam Long userId, @RequestParam String identity){
         String sseMapKey = SsePrefixUtils.generatorSseKey(userId,identity);
-        System.out.println("Closed："+sseMapKey);
+        log.info("Closed SSE connection for key {}", sseMapKey);
         if (sseEmitterMap.containsKey(sseMapKey)){
             sseEmitterMap.remove(sseMapKey);
         }

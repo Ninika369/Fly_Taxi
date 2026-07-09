@@ -1,4 +1,4 @@
-package com.geroge.apipassenger.service;
+package com.george.apipassenger.service;
 
 import com.george.internalCommon.constant.CommonStatus;
 import com.george.internalCommon.constant.TokenConstant;
@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * @Author: George Sun
  * @Date: 2024-10-21-16:01
- * @Description: com.geroge.apipassenger.service
+ * @Description: com.george.apipassenger.service
  */
 @Service
 public class TokenService {

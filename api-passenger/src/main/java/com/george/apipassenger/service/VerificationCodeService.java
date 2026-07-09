@@ -1,4 +1,4 @@
-package com.geroge.apipassenger.service;
+package com.george.apipassenger.service;
 
 import com.alibaba.nacos.common.utils.StringUtils;
 import com.auth0.jwt.JWT;
@@ -11,8 +11,8 @@ import com.george.internalCommon.response.DataResponse;
 import com.george.internalCommon.response.TokenResponse;
 import com.george.internalCommon.util.JwtUtils;
 import com.george.internalCommon.util.RedisPrefixUtils;
-import com.geroge.apipassenger.remote.ServicePassengerUserClient;
-import com.geroge.apipassenger.remote.serviceVerificationCodeClient;
+import com.george.apipassenger.remote.ServicePassengerUserClient;
+import com.george.apipassenger.remote.serviceVerificationCodeClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;

@@ -1,4 +1,4 @@
-package com.geroge.apipassenger.remote;
+package com.george.apipassenger.remote;
 
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.request.PredictPriceDTO;

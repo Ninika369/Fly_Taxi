@@ -1,8 +1,8 @@
-package com.geroge.apipassenger.controller;
+package com.george.apipassenger.controller;
 
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.request.PredictPriceDTO;
-import com.geroge.apipassenger.service.PredictPriceService;
+import com.george.apipassenger.service.PredictPriceService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PostMapping;

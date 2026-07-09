@@ -1,4 +1,4 @@
-package com.geroge.apipassenger.controller;
+package com.george.apipassenger.controller;
 
 
 import com.george.internalCommon.constant.CommonStatus;
@@ -8,7 +8,7 @@ import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.dto.TokenResult;
 import com.george.internalCommon.request.OrderRequest;
 import com.george.internalCommon.util.JwtUtils;
-import com.geroge.apipassenger.service.OrderService;
+import com.george.apipassenger.service.OrderService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;

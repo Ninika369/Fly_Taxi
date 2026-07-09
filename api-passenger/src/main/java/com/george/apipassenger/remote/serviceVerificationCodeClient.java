@@ -1,4 +1,4 @@
-package com.geroge.apipassenger.remote;
+package com.george.apipassenger.remote;
 
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.response.DataResponse;
@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 /**
  * @Author: George Sun
  * @Date: 2024-10-16-12:48
- * @Description: com.geroge.apipassenger.remote
+ * @Description: com.george.apipassenger.remote
  */
 
 /**

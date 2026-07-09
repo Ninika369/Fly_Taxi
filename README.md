@@ -134,8 +134,6 @@ flowchart LR
 
 The CI pipeline currently runs 54 pure unit tests (no Spring context, no database) across `internal-common`, `service-price`, and `service-order`, using **JUnit 5** and **Mockito**.
 
-Several auto-generated Spring context smoke tests still exist in other modules and are currently excluded from CI because they require live infrastructure.
-
 | Test Class | Module | Tests | What It Covers |
 |-----------|--------|-------|----------------|
 | `BigDecimalUtilsTest` | internal-common | 11 | Arithmetic precision — add, subtract, multiply, divide, edge cases (zero, negative, divide-by-zero) |
@@ -160,7 +158,7 @@ Every push to `master` triggers automated testing:
 1. **Build** — `mvn clean install -DskipTests` (compile all 12 modules)
 2. **Test** — `mvn test -pl internal-common,service-price,service-order` (run 54 targeted unit tests)
 
-CI is intentionally scoped to the 3 modules with substantive unit tests. Several auto-generated Spring context smoke tests in other modules are not part of the pipeline because they depend on live infrastructure such as MySQL, Redis, or Nacos.
+CI is intentionally scoped to the three modules with substantive unit tests. The remaining modules do not have test suites yet; integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
 
 ### API Documentation — OpenAPI / Swagger
 

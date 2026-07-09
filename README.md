@@ -130,16 +130,16 @@ flowchart LR
 
 ## Engineering Practices
 
-### Test Automation — 50 CI-verified unit tests across 4 test classes
+### Test Automation — 54 CI-verified unit tests across 4 test classes
 
-The CI pipeline currently runs 50 pure unit tests (no Spring context, no database) across `internal-common`, `service-price`, and `service-order`, using **JUnit 5** and **Mockito**.
+The CI pipeline currently runs 54 pure unit tests (no Spring context, no database) across `internal-common`, `service-price`, and `service-order`, using **JUnit 5** and **Mockito**.
 
 Several auto-generated Spring context smoke tests still exist in other modules and are currently excluded from CI because they require live infrastructure.
 
 | Test Class | Module | Tests | What It Covers |
 |-----------|--------|-------|----------------|
 | `BigDecimalUtilsTest` | internal-common | 11 | Arithmetic precision — add, subtract, multiply, divide, edge cases (zero, negative, divide-by-zero) |
-| `PredictPriceServiceTest` | service-price | 13 | Pricing formula — normal trips, short trips, traffic jams, rounding boundaries (995m/1004m/1005m), duration staircase, regression tests for .005 precision fix |
+| `PredictPriceServiceTest` | service-price | 17 | Pricing formula — normal trips, short trips, traffic jams, rounding boundaries (995m/1004m/1005m), duration staircase, input validation for invalid distance/duration/null inputs, regression tests for .005 precision fix |
 | `PriceRuleServiceTest` | service-price | 8 | Rule versioning — create, edit with change detection, duplicate rejection, fareType composition, version auto-increment |
 | `OrderInfoServiceTest` | service-order | 18 | Order cancellation state machine and dispatch lock safety — 5 passenger states, 4 driver states, time boundary (1m59s free vs 2m0s penalty), Mockito verify() for DB writes and lock release |
 
@@ -158,7 +158,7 @@ During testing, we discovered a **half-cent rounding bug** in the pricing calcul
 Every push to `master` triggers automated testing:
 
 1. **Build** — `mvn clean install -DskipTests` (compile all 12 modules)
-2. **Test** — `mvn test -pl internal-common,service-price,service-order` (run 50 targeted unit tests)
+2. **Test** — `mvn test -pl internal-common,service-price,service-order` (run 54 targeted unit tests)
 
 CI is intentionally scoped to the 3 modules with substantive unit tests. Several auto-generated Spring context smoke tests in other modules are not part of the pipeline because they depend on live infrastructure such as MySQL, Redis, or Nacos.
 
@@ -187,7 +187,7 @@ This applies to datasource passwords, Nacos credentials, Redis settings, JWT sig
 ## If you're reviewing the code, start here
 
 - [`PredictPriceService.java`](service-price/src/main/java/com/george/serviceprice/service/PredictPriceService.java) — core pricing logic with BigDecimal precision fix
-- [`PredictPriceServiceTest.java`](service-price/src/test/java/com/george/serviceprice/service/PredictPriceServiceTest.java) — 13 tests including rounding boundary and regression tests
+- [`PredictPriceServiceTest.java`](service-price/src/test/java/com/george/serviceprice/service/PredictPriceServiceTest.java) — 17 tests including rounding boundary, input validation, and regression tests
 - [`OrderInfoServiceTest.java`](service-order/src/test/java/com/george/serviceorder/service/OrderInfoServiceTest.java) — 18 tests covering cancellation state machine and dispatch lock safety with Mockito
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — CI pipeline configuration
 
@@ -231,7 +231,6 @@ mvn test -pl internal-common,service-price,service-order
 - **Intermediate rounding:** `BigDecimalUtils.divide()` rounds to 2 decimal places at each step, causing 995m–1004m to all resolve as 1.00km. Characterization tests are in place; fix planned to defer rounding to the final calculation step.
 - **Cancel threshold readability:** `ChronoUnit.MINUTES.between() > 1` effectively means ≥ 2 minutes due to truncation. Semantically clearer as `>= 2`.
 - **Variable naming:** `distanceMiles` / `startMile` should be `distanceKm` / `startKm` to reflect actual units.
-- **No input validation:** Negative distance or duration values are silently accepted, producing incorrect prices.
 
 ### Roadmap
 - [ ] Add request validation (`@Valid` / `@Positive`) for pricing endpoints

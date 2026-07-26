@@ -18,6 +18,7 @@
         <module>api-passenger</module>
         <module>service-verificationCode</module>
         <module>internal-common</module>
+        <module>security-support-core</module>
         <module>service-passenger-user</module>
         <module>service-price</module>
         <module>service-map</module>

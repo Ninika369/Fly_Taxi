@@ -24,7 +24,7 @@ A backend ride-hailing platform built with **Java / Spring Boot / Spring Cloud**
 
 ## System Architecture
 
-The platform follows a layered microservices architecture with 11 independently deployable modules and 1 shared common library:
+The platform follows a layered microservices architecture with 11 independently deployable Spring Boot applications and 2 shared libraries in a 13-module Maven reactor:
 
 ```mermaid
 flowchart LR
@@ -81,6 +81,7 @@ flowchart LR
 **Shared platform notes:**
 - All Spring Boot modules register with **Nacos** for service discovery.
 - `internal-common` is a shared library used across all modules for DTOs, constants, and utility classes.
+- `security-support-core` is a framework-neutral shared library containing the new principal models, verification contracts, failure semantics, and test fixtures. It is a skeleton in this PR and is not yet wired into existing applications.
 - MySQL-backed services include `service-price`, `service-order`, `service-driver-user`, `service-passenger-user`, and `service-map`.
 - Redis is used in `api-passenger`, `api-driver`, and `service-order` for token/code storage, blacklist checks, and coordination-related runtime state.
 
@@ -125,14 +126,15 @@ flowchart LR
 | `service-pay` | 9001 | Alipay sandbox payment integration |
 | `service-sse-push` | 9000 | Real-time event push to clients via Server-Sent Events |
 | `internal-common` | — | Shared library — DTOs, utilities, constants (no web server) |
+| `security-support-core` | — | Shared security library — framework-neutral principal models, verification contracts, and failure semantics (no web server; consumer migration not yet started) |
 
 ---
 
 ## Engineering Practices
 
-### Test Automation — 56 CI-verified tests across 6 test classes
+### Test Automation — 68 CI-verified tests across 10 test classes
 
-The CI pipeline runs root-level `mvn test` across the full 12-module Maven reactor. The repository currently has 56 CI-verified tests: 54 pure unit tests and 2 lightweight HTTP contract tests. None require a full Spring application context or external MySQL, Redis, or Nacos infrastructure. MockMvc verifies the server-side controller contract, while WireMock exercises the OpenFeign client's HTTP method, path, JSON body, content type, and response decoding. These tests currently live in `internal-common`, `service-price`, and `service-order`; modules without test classes still participate in the reactor and will automatically be covered as tests are added later.
+The CI pipeline runs root-level `mvn test` across the full 13-module Maven reactor. The repository currently has 68 CI-verified tests: 66 pure unit tests and 2 lightweight HTTP contract tests. None require a full Spring application context or external MySQL, Redis, or Nacos infrastructure. MockMvc verifies the server-side controller contract, while WireMock exercises the OpenFeign client's HTTP method, path, JSON body, content type, and response decoding. These tests currently live in `internal-common`, `service-price`, `service-order`, and `security-support-core`; modules without test classes still participate in the reactor and will automatically be covered as tests are added later.
 
 | Test Class | Module | Tests | What It Covers |
 |-----------|--------|-------|----------------|
@@ -142,6 +144,10 @@ The CI pipeline runs root-level `mvn test` across the full 12-module Maven react
 | `OrderInfoServiceTest` | service-order | 18 | Order cancellation state machine and dispatch lock safety — 5 passenger states, 4 driver states, time boundary (1m59s free vs 2m0s penalty), Mockito verify() for DB writes and lock release |
 | `PriceRuleControllerContractTest` | service-price | 1 | MockMvc server contract for `POST /price-rule/is-latest` — JSON request mapping, response schema, and service delegation |
 | `ServicePriceClientContractTest` | service-order | 1 | WireMock/OpenFeign client contract for `POST /price-rule/is-latest` — method, path, content type, JSON body, and response decoding |
+| `RequestPrincipalTest` | security-support-core | 3 | Shared-principal value semantics, refresh-token rejection, and framework-neutral field-type guard |
+| `TokenClaimsTest` | security-support-core | 3 | Typed claim invariants, required text validation, and strict timestamp ordering |
+| `SecurityFailureCodeTest` | security-support-core | 2 | Stable authentication-versus-authorization failure classification |
+| `TokenVerificationResultTest` | security-support-core | 4 | Session-validation handoff, service-token independence, result invariants, and failure access rules |
 
 ### Precision Bug Discovery & Fix
 
@@ -157,10 +163,10 @@ During testing, we discovered a **half-cent rounding bug** in the pricing calcul
 
 Every pull request targeting `master` and every push to `master` triggers automated testing:
 
-1. **Build** — `mvn clean install -DskipTests` (compile all 12 modules)
-2. **Test** — `mvn test` (run root-level tests across the full 12-module reactor)
+1. **Build** — `mvn clean install -DskipTests` (compile all 13 modules)
+2. **Test** — `mvn test` (run root-level tests across the full 13-module reactor)
 
-The 56 tests currently include 54 unit tests and 2 lightweight contract tests in `internal-common`, `service-price`, and `service-order`. The remaining modules do not have test classes yet; they still participate in the Maven reactor and will be included automatically as tests are added later. Integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
+The 68 tests currently include 66 unit tests and 2 lightweight contract tests in `internal-common`, `service-price`, `service-order`, and `security-support-core`. The remaining modules do not have test classes yet; they still participate in the Maven reactor and will be included automatically as tests are added later. Integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
 
 ### API Documentation — OpenAPI / Swagger
 
@@ -217,7 +223,7 @@ mvn test
 
 # Optional local shortcut: run only the current test-bearing modules
 mvn test \
-  -pl internal-common,service-price,service-order
+  -pl internal-common,service-price,service-order,security-support-core
 ```
 
 ### Running the Services

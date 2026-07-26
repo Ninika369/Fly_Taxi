@@ -1,0 +1,32 @@
+-- TEMPLATE ONLY - DO NOT EXECUTE.
+-- Copy and rename this file before implementing a real forward migration.
+--
+-- Change ID:
+-- Title:
+-- Owner:
+-- Owning service:
+-- Target database:
+-- MySQL version:
+-- Depends on:
+-- Related issue/PR:
+-- Paired rollback file:
+-- Paired verification file:
+-- Risk level:
+-- Expected lock/availability impact:
+-- Expected execution time:
+-- Backup or restore prerequisite:
+--
+-- PURPOSE
+-- TODO: State the business invariant or schema problem addressed by this change.
+--
+-- PRECONDITIONS
+-- TODO: Reference the completed read-only preflight and any separately reviewed cleanup.
+--
+-- FORWARD CHANGE
+-- TODO: Add the reviewed forward SQL only after preconditions are satisfied.
+--
+-- OPERATIONAL NOTES
+-- TODO: Document execution order, monitoring, abort criteria, and ownership.
+--
+-- IMPORTANT
+-- MySQL DDL may implicitly commit. Do not rely on transaction rollback for schema changes.

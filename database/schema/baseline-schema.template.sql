@@ -1,0 +1,28 @@
+-- TEMPLATE ONLY - DO NOT EXECUTE.
+-- Copy and rename this file before documenting a real baseline schema.
+--
+-- Baseline name:
+-- Owning service:
+-- Target database:
+-- MySQL version:
+-- Source migration/change ID:
+-- Last reconciled date:
+-- Maintainer:
+--
+-- PURPOSE
+-- TODO: Describe what an empty database created from this baseline must contain.
+--
+-- ASSUMPTIONS
+-- TODO: Record character set, collation, time-zone, ID, and naming assumptions.
+--
+-- OBJECT CREATION ORDER
+-- TODO: List tables, constraints, views, and supporting objects in dependency order.
+--
+-- BASELINE DEFINITIONS
+-- TODO: Add reviewed schema definitions only after the current database has been reconciled.
+--
+-- VERIFICATION
+-- TODO: Reference the checks that prove a fresh database matches the intended baseline.
+--
+-- NOTES
+-- TODO: Record known exclusions, legacy compatibility requirements, and ownership boundaries.

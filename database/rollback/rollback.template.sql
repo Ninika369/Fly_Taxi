@@ -1,0 +1,29 @@
+-- TEMPLATE ONLY - DO NOT EXECUTE.
+-- Copy and rename this file before documenting a real rollback or restore path.
+--
+-- Change ID:
+-- Title:
+-- Owner:
+-- Owning service:
+-- Target database:
+-- Forward migration file:
+-- Paired verification file:
+-- Reversibility: FULL / PARTIAL / IRREVERSIBLE
+-- Data-loss risk:
+-- Required backup:
+-- Maximum safe rollback window:
+--
+-- ROLLBACK PRECONDITIONS
+-- TODO: State the conditions that must be true before rollback begins.
+--
+-- ROLLBACK OR RESTORE STEPS
+-- TODO: Add reviewed rollback SQL or an explicit backup-restore procedure.
+--
+-- DATA RECONCILIATION
+-- TODO: Explain how data written after the forward migration will be preserved or repaired.
+--
+-- POST-ROLLBACK VERIFICATION
+-- TODO: Reference the assertions that prove the previous state has been restored.
+--
+-- ESCALATION
+-- TODO: Record abort criteria, owner, and recovery path if rollback fails.

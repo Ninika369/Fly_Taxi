@@ -1,0 +1,29 @@
+-- TEMPLATE ONLY - DO NOT EXECUTE.
+-- Copy and rename this file before writing checks for a real database change.
+--
+-- Change ID:
+-- Title:
+-- Owner:
+-- Owning service:
+-- Target database:
+-- Forward migration file:
+-- Rollback file:
+--
+-- RULES
+-- Completed verification scripts should remain read-only.
+-- Every query must document its expected result and failure meaning.
+--
+-- PRE-FLIGHT ASSERTIONS
+-- TODO: Check duplicates, orphaned rows, NULL values, incompatible types, and natural-key conflicts.
+-- TODO: Record the expected result for each query.
+--
+-- POST-MIGRATION ASSERTIONS
+-- TODO: Check schema shape, constraints, indexes, row counts, and preserved business invariants.
+-- TODO: Record the expected result for each query.
+--
+-- POST-ROLLBACK ASSERTIONS
+-- TODO: Check that the previous schema and data invariants have been restored.
+-- TODO: Record the expected result for each query.
+--
+-- RESULT RECORD
+-- TODO: Record environment, execution time, operator, actual result, and follow-up action.

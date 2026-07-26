@@ -132,7 +132,7 @@ flowchart LR
 
 ### Test Automation — 54 CI-verified unit tests across 4 test classes
 
-The CI pipeline currently runs 54 pure unit tests (no Spring context, no database) across `internal-common`, `service-price`, and `service-order`, using **JUnit 5** and **Mockito**.
+The CI pipeline runs root-level `mvn test` across the full 12-module Maven reactor. The repository currently has 54 substantive unit tests that require neither a Spring context nor a database, using **JUnit 5** and **Mockito**. Those tests currently live in `internal-common`, `service-price`, and `service-order`; modules without test classes still participate in the reactor and will automatically be covered as tests are added later.
 
 | Test Class | Module | Tests | What It Covers |
 |-----------|--------|-------|----------------|
@@ -156,9 +156,9 @@ During testing, we discovered a **half-cent rounding bug** in the pricing calcul
 Every pull request targeting `master` and every push to `master` triggers automated testing:
 
 1. **Build** — `mvn clean install -DskipTests` (compile all 12 modules)
-2. **Test** — `mvn test -pl internal-common,service-price,service-order` (run 54 targeted unit tests)
+2. **Test** — `mvn test` (run root-level tests across the full 12-module reactor)
 
-CI is intentionally scoped to the three modules with substantive unit tests. The remaining modules do not have test suites yet; integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
+The 54 substantive unit tests currently live in `internal-common`, `service-price`, and `service-order`. The remaining modules do not have test classes yet; they still participate in the Maven reactor and will be included automatically as tests are added later. Integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
 
 ### API Documentation — OpenAPI / Swagger
 
@@ -213,8 +213,9 @@ mvn clean install -DskipTests
 # Run all repository tests (pure unit tests, no infrastructure needed)
 mvn test
 
-# Or run only the CI-targeted modules
-mvn test -pl internal-common,service-price,service-order
+# Optional local shortcut: run only the current test-bearing modules
+mvn test \
+  -pl internal-common,service-price,service-order
 ```
 
 ### Running the Services

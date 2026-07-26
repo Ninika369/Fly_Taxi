@@ -24,7 +24,7 @@ A backend ride-hailing platform built with **Java / Spring Boot / Spring Cloud**
 
 ## System Architecture
 
-The platform follows a layered microservices architecture with 11 independently deployable Spring Boot applications and 2 shared libraries in a 13-module Maven reactor:
+The platform follows a layered microservices architecture with 11 independently deployable Spring Boot applications and 3 shared libraries in a 14-module Maven reactor:
 
 ```mermaid
 flowchart LR
@@ -81,7 +81,8 @@ flowchart LR
 **Shared platform notes:**
 - All Spring Boot modules register with **Nacos** for service discovery.
 - `internal-common` is a shared library used across all modules for DTOs, constants, and utility classes.
-- `security-support-core` is a framework-neutral shared library containing the new principal models, verification contracts, failure semantics, and test fixtures. It is a skeleton in this PR and is not yet wired into existing applications.
+- `security-support-core` remains a framework-neutral skeleton for principal models, verification contracts, failure semantics, and test fixtures. It is not yet wired into existing applications.
+- `security-support-session` is a dependency-light skeleton for session validation, Bearer extraction, principal creation after session validation, and HTTP error mapping. It has no Spring Web or Redis adapter implementation yet and is not wired into existing applications.
 - MySQL-backed services include `service-price`, `service-order`, `service-driver-user`, `service-passenger-user`, and `service-map`.
 - Redis is used in `api-passenger`, `api-driver`, and `service-order` for token/code storage, blacklist checks, and coordination-related runtime state.
 
@@ -127,14 +128,15 @@ flowchart LR
 | `service-sse-push` | 9000 | Real-time event push to clients via Server-Sent Events |
 | `internal-common` | — | Shared library — DTOs, utilities, constants (no web server) |
 | `security-support-core` | — | Shared security library — framework-neutral principal models, verification contracts, and failure semantics (no web server; consumer migration not yet started) |
+| `security-support-session` | — | Shared security library — session-validation and HTTP-adaptation contracts built on core (no web server; no Spring Web/Redis adapter yet; consumer migration not started) |
 
 ---
 
 ## Engineering Practices
 
-### Test Automation — 68 CI-verified tests across 10 test classes
+### Test Automation — 80 CI-verified tests across 14 test classes
 
-The CI pipeline runs root-level `mvn test` across the full 13-module Maven reactor. The repository currently has 68 CI-verified tests: 66 pure unit tests and 2 lightweight HTTP contract tests. None require a full Spring application context or external MySQL, Redis, or Nacos infrastructure. MockMvc verifies the server-side controller contract, while WireMock exercises the OpenFeign client's HTTP method, path, JSON body, content type, and response decoding. These tests currently live in `internal-common`, `service-price`, `service-order`, and `security-support-core`; modules without test classes still participate in the reactor and will automatically be covered as tests are added later.
+The CI pipeline runs root-level `mvn test` across the full 14-module Maven reactor. The repository currently has 80 CI-verified tests: 78 pure unit tests and 2 lightweight HTTP contract tests. None require a full Spring application context or external MySQL, Redis, or Nacos infrastructure. MockMvc verifies the server-side controller contract, while WireMock exercises the OpenFeign client's HTTP method, path, JSON body, content type, and response decoding. These tests currently live in `internal-common`, `service-price`, `service-order`, `security-support-core`, and `security-support-session`; modules without test classes still participate in the reactor and will automatically be covered as tests are added later.
 
 | Test Class | Module | Tests | What It Covers |
 |-----------|--------|-------|----------------|
@@ -148,6 +150,10 @@ The CI pipeline runs root-level `mvn test` across the full 13-module Maven react
 | `TokenClaimsTest` | security-support-core | 3 | Typed claim invariants, required text validation, and strict timestamp ordering |
 | `SecurityFailureCodeTest` | security-support-core | 2 | Stable authentication-versus-authorization failure classification |
 | `TokenVerificationResultTest` | security-support-core | 4 | Session-validation handoff, service-token independence, result invariants, and failure access rules |
+| `SessionValidationResultTest` | security-support-session | 3 | Session validation success/failure invariants and invalid factory rejection |
+| `SessionPrincipalFactoryTest` | security-support-session | 3 | Core-to-session handoff, access-principal creation, and invalid session/non-access rejection |
+| `BearerTokenExtractorTest` | security-support-session | 3 | Case-insensitive Bearer extraction and malformed, missing, or whitespace-containing credential rejection |
+| `SecurityHttpErrorMapperTest` | security-support-session | 3 | Stable 401/403/503 translation for core, session, and missing-credential failures |
 
 ### Precision Bug Discovery & Fix
 
@@ -163,10 +169,10 @@ During testing, we discovered a **half-cent rounding bug** in the pricing calcul
 
 Every pull request targeting `master` and every push to `master` triggers automated testing:
 
-1. **Build** — `mvn clean install -DskipTests` (compile all 13 modules)
-2. **Test** — `mvn test` (run root-level tests across the full 13-module reactor)
+1. **Build** — `mvn clean install -DskipTests` (compile all 14 modules)
+2. **Test** — `mvn test` (run root-level tests across the full 14-module reactor)
 
-The 68 tests currently include 66 unit tests and 2 lightweight contract tests in `internal-common`, `service-price`, `service-order`, and `security-support-core`. The remaining modules do not have test classes yet; they still participate in the Maven reactor and will be included automatically as tests are added later. Integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
+The 80 tests currently include 78 unit tests and 2 lightweight contract tests in `internal-common`, `service-price`, `service-order`, `security-support-core`, and `security-support-session`. The remaining modules do not have test classes yet; they still participate in the Maven reactor and will be included automatically as tests are added later. Integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
 
 ### API Documentation — OpenAPI / Swagger
 
@@ -218,12 +224,12 @@ cd Fly_Taxi
 # Build all modules
 mvn clean install -DskipTests
 
-# Run all repository tests (pure unit tests, no infrastructure needed)
+# Run all repository tests (unit and lightweight contract tests, no infrastructure needed)
 mvn test
 
 # Optional local shortcut: run only the current test-bearing modules
 mvn test \
-  -pl internal-common,service-price,service-order,security-support-core
+  -pl internal-common,service-price,service-order,security-support-core,security-support-session
 ```
 
 ### Running the Services

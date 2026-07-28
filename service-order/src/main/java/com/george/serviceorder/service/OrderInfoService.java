@@ -18,6 +18,9 @@ import com.george.internalCommon.response.TerminalResponse;
 import com.george.internalCommon.response.TrsearchResponse;
 import com.george.internalCommon.util.RedisPrefixUtils;
 import com.george.serviceorder.mapper.OrderInfoMapper;
+import com.george.serviceorder.remote.FinalizationDriverUserClient;
+import com.george.serviceorder.remote.FinalizationMapClient;
+import com.george.serviceorder.remote.FinalizationPriceClient;
 import com.george.serviceorder.remote.ServiceDriverUserClient;
 import com.george.serviceorder.remote.ServiceMapClient;
 import com.george.serviceorder.remote.ServicePriceClient;
@@ -29,10 +32,12 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.RequestBody;
 
+import javax.annotation.PostConstruct;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -50,12 +55,42 @@ import java.util.concurrent.TimeUnit;
 public class OrderInfoService {
 
     private static final int MAX_DISPATCH_ATTEMPTS = 6;
-    private static final int MAX_FINALIZATION_ATTEMPTS = 3;
-    private static final long FINALIZATION_BASE_RETRY_DELAY_SECONDS = 30L;
-    private static final long FINALIZATION_PROCESSING_LEASE_SECONDS = 120L;
     private static final int FINALIZATION_RETRY_BATCH_SIZE = 50;
     private long dispatchRetryDelayMs = TimeUnit.SECONDS.toMillis(20);
     private Clock clock = Clock.systemDefaultZone();
+
+    @Value("${order.finalization.max-attempts:3}")
+    private int maxFinalizationAttempts = 3;
+
+    @Value("${order.finalization.base-retry-delay-seconds:30}")
+    private long finalizationBaseRetryDelaySeconds = 30L;
+
+    @Value("${order.finalization.max-retry-delay-seconds:900}")
+    private long finalizationMaxRetryDelaySeconds = 900L;
+
+    @Value("${order.finalization.processing-lease-seconds:120}")
+    private long finalizationProcessingLeaseSeconds = 120L;
+
+    @Value("${order.finalization.lease-safety-margin-ms:30000}")
+    private long finalizationLeaseSafetyMarginMs = 30000L;
+
+    @Value("${feign.client.config.finalizationDriverUserClient.connectTimeout:2000}")
+    private int finalizationDriverConnectTimeoutMs = 2000;
+
+    @Value("${feign.client.config.finalizationDriverUserClient.readTimeout:10000}")
+    private int finalizationDriverReadTimeoutMs = 10000;
+
+    @Value("${feign.client.config.finalizationMapClient.connectTimeout:2000}")
+    private int finalizationMapConnectTimeoutMs = 2000;
+
+    @Value("${feign.client.config.finalizationMapClient.readTimeout:30000}")
+    private int finalizationMapReadTimeoutMs = 30000;
+
+    @Value("${feign.client.config.finalizationPriceClient.connectTimeout:2000}")
+    private int finalizationPriceConnectTimeoutMs = 2000;
+
+    @Value("${feign.client.config.finalizationPriceClient.readTimeout:10000}")
+    private int finalizationPriceReadTimeoutMs = 10000;
 
     // the mapper to interact with orderInfo database
     @Autowired
@@ -77,6 +112,15 @@ public class OrderInfoService {
     @Autowired
     ServiceMapClient serviceMapClient;
 
+    @Autowired
+    FinalizationPriceClient finalizationPriceClient;
+
+    @Autowired
+    FinalizationDriverUserClient finalizationDriverUserClient;
+
+    @Autowired
+    FinalizationMapClient finalizationMapClient;
+
     // the mapper to interact with redisson service
     @Autowired
     RedissonClient redissonClient;
@@ -84,6 +128,22 @@ public class OrderInfoService {
     // the mapper to push order to front-end service
     @Autowired
     ServiceSsePushClient serviceSsePushClient;
+
+    @PostConstruct
+    public void validateFinalizationPolicyOnStartup() {
+        validateFinalizationPolicy(
+                maxFinalizationAttempts,
+                finalizationBaseRetryDelaySeconds,
+                finalizationMaxRetryDelaySeconds,
+                finalizationProcessingLeaseSeconds,
+                finalizationLeaseSafetyMarginMs,
+                finalizationDriverConnectTimeoutMs,
+                finalizationDriverReadTimeoutMs,
+                finalizationMapConnectTimeoutMs,
+                finalizationMapReadTimeoutMs,
+                finalizationPriceConnectTimeoutMs,
+                finalizationPriceReadTimeoutMs);
+    }
 
 
     /**
@@ -599,6 +659,48 @@ public class OrderInfoService {
         return claimAndFinalize(orderInfo, null, now);
     }
 
+    public ResponseResult scheduleFailedFinalizationRecovery(Long orderId) {
+        OrderInfo orderInfo = selectOrderById(orderId);
+        if (orderInfo == null) {
+            return ResponseResult.fail(CommonStatus.ORDER_NOT_FOUND.getCode(),
+                    CommonStatus.ORDER_NOT_FOUND.getMessage());
+        }
+
+        Integer orderStatus = orderInfo.getOrderStatus();
+        if (isFinalizationIdempotentSuccess(orderStatus)) {
+            return ResponseResult.success();
+        }
+        if (isOrderStatus(orderStatus, OrderConstant.FINALIZATION_PENDING)) {
+            return ResponseResult.fail(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getCode(),
+                    CommonStatus.FINALIZATION_RETRY_SCHEDULED.getMessage());
+        }
+        if (!isOrderStatus(orderStatus, OrderConstant.FINALIZATION_FAILED)) {
+            return ResponseResult.fail(CommonStatus.ORDER_FINALIZATION_NOT_ALLOWED.getCode(),
+                    CommonStatus.ORDER_FINALIZATION_NOT_ALLOWED.getMessage());
+        }
+
+        LocalDateTime now = LocalDateTime.now(clock);
+        Integer currentAttempts = orderInfo.getFinalizationAttempts();
+        UpdateWrapper<OrderInfo> updateWrapper = new UpdateWrapper<>();
+        updateWrapper.eq("id", orderId)
+                .eq("order_status", OrderConstant.FINALIZATION_FAILED)
+                .eq("finalization_attempts", currentAttempts);
+        updateWrapper.set("order_status", OrderConstant.FINALIZATION_PENDING)
+                .set("finalization_attempts", 0)
+                .set("finalization_next_retry_at", now)
+                .set("finalization_last_error", safeFinalizationError(ResponseResult.fail(
+                        CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getCode(),
+                        CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getMessage())))
+                .set("gmt_modified", now);
+
+        int updated = orderInfoMapper.update(null, updateWrapper);
+        if (updated == 0) {
+            return handleFailedFinalizationRecoveryCasMiss(orderId);
+        }
+        return ResponseResult.fail(CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getCode(),
+                CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getMessage());
+    }
+
     public int retryDueFinalizations(LocalDateTime now) {
         return retryDueFinalizations(now, FINALIZATION_RETRY_BATCH_SIZE);
     }
@@ -634,17 +736,17 @@ public class OrderInfoService {
         Integer currentStatus = orderInfo.getOrderStatus();
         int currentAttempts = currentFinalizationAttempts(orderInfo);
         if (isOrderStatus(currentStatus, OrderConstant.FINALIZATION_PENDING)
-                && currentAttempts >= MAX_FINALIZATION_ATTEMPTS
+                && currentAttempts >= maxFinalizationAttempts
                 && isFinalizationDue(orderInfo, now)) {
             return moveExpiredFinalizationToFailed(orderInfo, currentAttempts, now);
         }
-        if (currentAttempts >= MAX_FINALIZATION_ATTEMPTS) {
+        if (currentAttempts >= maxFinalizationAttempts) {
             return ResponseResult.fail(CommonStatus.FINALIZATION_FAILED.getCode(),
                     CommonStatus.FINALIZATION_FAILED.getMessage());
         }
 
         int attempt = currentAttempts + 1;
-        LocalDateTime processingLeaseUntil = now.plusSeconds(FINALIZATION_PROCESSING_LEASE_SECONDS);
+        LocalDateTime processingLeaseUntil = now.plusSeconds(finalizationProcessingLeaseSeconds);
         Long traceEndEpochMs = orderInfo.getFinalizationTraceEndEpochMs();
         LocalDateTime passengerGetoffTime = orderInfo.getPassengerGetoffTime();
         String passengerGetoffLongitude = orderInfo.getPassengerGetoffLongitude();
@@ -699,7 +801,7 @@ public class OrderInfoService {
         ResponseResult<Car> carById = null;
         if (orderInfo.getCarId() != null) {
             try {
-                carById = serviceDriverUserClient.getCarById(orderInfo.getCarId());
+                carById = finalizationDriverUserClient.getCarById(orderInfo.getCarId());
             } catch (RuntimeException e) {
                 logFinalizationDependencyException(orderInfo.getId(), attempt, "getCarById", e);
                 return handleFinalizationFailure(orderInfo, attempt, downstreamResponseError());
@@ -724,7 +826,7 @@ public class OrderInfoService {
 
         ResponseResult<TrsearchResponse> trsearch;
         try {
-            trsearch = serviceMapClient.trsearch(car.getTid(), starttime,endtime);
+            trsearch = finalizationMapClient.trsearch(car.getTid(), starttime,endtime);
         } catch (RuntimeException e) {
             logFinalizationDependencyException(orderInfo.getId(), attempt, "trsearch", e);
             return handleFinalizationFailure(orderInfo, attempt, downstreamResponseError());
@@ -742,7 +844,7 @@ public class OrderInfoService {
         String vehicleType = orderInfo.getVehicleType();
         ResponseResult<Double> doubleResponseResult;
         try {
-            doubleResponseResult = servicePriceClient.calculatePrice(driveMile.intValue(), driveDurationSeconds.intValue(), address, vehicleType);
+            doubleResponseResult = finalizationPriceClient.calculatePrice(driveMile.intValue(), driveDurationSeconds.intValue(), address, vehicleType);
         } catch (RuntimeException e) {
             logFinalizationDependencyException(orderInfo.getId(), attempt, "calculatePrice", e);
             return handleFinalizationFailure(orderInfo, attempt, downstreamResponseError());
@@ -775,7 +877,7 @@ public class OrderInfoService {
         ResponseResult canonicalFailure = canonicalFinalizationFailure(failure);
         String safeError = safeFinalizationError(canonicalFailure);
 
-        if (attempt >= MAX_FINALIZATION_ATTEMPTS) {
+        if (attempt >= maxFinalizationAttempts) {
             UpdateWrapper<OrderInfo> updateWrapper = finalizationTerminalUpdateWrapper(orderInfo, attempt);
             updateWrapper.set("order_status", OrderConstant.FINALIZATION_FAILED)
                     .set("finalization_next_retry_at", null)
@@ -853,6 +955,28 @@ public class OrderInfoService {
                 CommonStatus.FINALIZATION_RETRY_SCHEDULED.getMessage());
     }
 
+    private ResponseResult handleFailedFinalizationRecoveryCasMiss(Long orderId) {
+        OrderInfo latest = selectOrderById(orderId);
+        if (latest == null) {
+            return ResponseResult.fail(CommonStatus.ORDER_NOT_FOUND.getCode(),
+                    CommonStatus.ORDER_NOT_FOUND.getMessage());
+        }
+        Integer latestStatus = latest.getOrderStatus();
+        if (isFinalizationIdempotentSuccess(latestStatus)) {
+            return ResponseResult.success();
+        }
+        if (isOrderStatus(latestStatus, OrderConstant.FINALIZATION_PENDING)) {
+            return ResponseResult.fail(CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getCode(),
+                    CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getMessage());
+        }
+        if (isOrderStatus(latestStatus, OrderConstant.FINALIZATION_FAILED)) {
+            return ResponseResult.fail(CommonStatus.FINALIZATION_FAILED.getCode(),
+                    CommonStatus.FINALIZATION_FAILED.getMessage());
+        }
+        return ResponseResult.fail(CommonStatus.ORDER_FINALIZATION_NOT_ALLOWED.getCode(),
+                CommonStatus.ORDER_FINALIZATION_NOT_ALLOWED.getMessage());
+    }
+
     private void logFinalizationDependencyException(Long orderId, int attempt, String dependencyName, RuntimeException e) {
         log.warn("Order finalization dependency failed; orderId={}, attempt={}, dependency={}, exceptionType={}",
                 orderId, attempt, dependencyName, e.getClass().getSimpleName());
@@ -893,10 +1017,84 @@ public class OrderInfoService {
     }
 
     private long finalizationBackoffSeconds(int attempt) {
+        long delay = finalizationBaseRetryDelaySeconds;
         if (attempt <= 1) {
-            return FINALIZATION_BASE_RETRY_DELAY_SECONDS;
+            return Math.min(delay, finalizationMaxRetryDelaySeconds);
         }
-        return FINALIZATION_BASE_RETRY_DELAY_SECONDS * (1L << (attempt - 1));
+        for (int i = 1; i < attempt; i++) {
+            if (delay >= finalizationMaxRetryDelaySeconds
+                    || delay > finalizationMaxRetryDelaySeconds / 2) {
+                return finalizationMaxRetryDelaySeconds;
+            }
+            delay = delay * 2;
+        }
+        return Math.min(delay, finalizationMaxRetryDelaySeconds);
+    }
+
+    void validateFinalizationPolicy(
+            int maxAttempts,
+            long baseRetryDelaySeconds,
+            long maxRetryDelaySeconds,
+            long processingLeaseSeconds,
+            long leaseSafetyMarginMs,
+            int driverConnectTimeoutMs,
+            int driverReadTimeoutMs,
+            int mapConnectTimeoutMs,
+            int mapReadTimeoutMs,
+            int priceConnectTimeoutMs,
+            int priceReadTimeoutMs) {
+
+        if (maxAttempts < 1 || maxAttempts > 100) {
+            throw invalidFinalizationPolicy();
+        }
+        if (baseRetryDelaySeconds <= 0
+                || maxRetryDelaySeconds <= 0
+                || processingLeaseSeconds <= 0
+                || leaseSafetyMarginMs <= 0) {
+            throw invalidFinalizationPolicy();
+        }
+        if (baseRetryDelaySeconds > maxRetryDelaySeconds) {
+            throw invalidFinalizationPolicy();
+        }
+        if (driverConnectTimeoutMs <= 0
+                || driverReadTimeoutMs <= 0
+                || mapConnectTimeoutMs <= 0
+                || mapReadTimeoutMs <= 0
+                || priceConnectTimeoutMs <= 0
+                || priceReadTimeoutMs <= 0) {
+            throw invalidFinalizationPolicy();
+        }
+
+        long processingLeaseMillis = secondsToMillis(processingLeaseSeconds);
+        long remoteBudgetMillis = checkedAdd(
+                checkedAdd(
+                        checkedAdd(driverConnectTimeoutMs, driverReadTimeoutMs),
+                        checkedAdd(mapConnectTimeoutMs, mapReadTimeoutMs)),
+                checkedAdd(priceConnectTimeoutMs, priceReadTimeoutMs));
+        long requiredLeaseMillis = checkedAdd(remoteBudgetMillis, leaseSafetyMarginMs);
+        if (processingLeaseMillis <= requiredLeaseMillis) {
+            throw invalidFinalizationPolicy();
+        }
+    }
+
+    private long secondsToMillis(long seconds) {
+        try {
+            return Math.multiplyExact(seconds, TimeUnit.SECONDS.toMillis(1));
+        } catch (ArithmeticException e) {
+            throw invalidFinalizationPolicy();
+        }
+    }
+
+    private long checkedAdd(long left, long right) {
+        try {
+            return Math.addExact(left, right);
+        } catch (ArithmeticException e) {
+            throw invalidFinalizationPolicy();
+        }
+    }
+
+    private IllegalStateException invalidFinalizationPolicy() {
+        return new IllegalStateException("Invalid order finalization policy configuration");
     }
 
     private ResponseResult validateCarLookup(ResponseResult<Car> carById) {

@@ -2,7 +2,7 @@
 
 ## Status
 
-This directory establishes the repository structure and review process for FlyTaxi database changes. It currently contains templates only. It does not yet contain the complete current schema or executable migrations, so it must not be treated as proof that an empty database can already be rebuilt.
+This directory establishes the repository structure and review process for FlyTaxi database changes. It now contains reviewed ORDER-04 finalization metadata artifacts and READ-02 drive-time normalization artifacts, plus reusable templates. It does not yet contain the complete current schema, so it must not be treated as proof that an empty database can already be rebuilt.
 
 The audited database baseline is MySQL 8.0.30. Reconfirm the target version before executing a future change.
 
@@ -15,6 +15,17 @@ The audited database baseline is MySQL 8.0.30. Reconfirm the target version befo
 | `rollback/` | A paired rollback script or explicit restore plan for each forward change |
 | `verification/` | Read-only preflight checks and post-migration or post-rollback assertions |
 | `benchmark/` | Reproducible performance evidence, including query plans, read cost, and write-path impact |
+
+## Current Reviewed Artifacts
+
+| Change ID | Purpose | Status |
+|---|---|---|
+| ORDER-04 | Durable order finalization metadata, rollback, verification, and due-scan benchmark plan | Planned artifacts; execute only in a controlled MySQL 8.0.30 environment |
+| READ-02 | Normalize historical completed `order_info.drive_time` rows to seconds while retaining the physical column name | Planned artifacts; requires an operator-provided A2 seconds-code deployment cutover, reviewed candidate ceiling, explicit zero-candidate acknowledgement when applicable, audit evidence, and benchmark planning |
+
+READ-02 multiplies pre-A2 completed rows by 60 to produce minute-granularity lower-bound seconds. The old formula already lost sub-minute precision before storage; READ-02 does not and cannot restore true ride-duration seconds. It requires `@read02_max_candidate_rows`, verifies the actual `drive_time` column is signed BIGINT before applying BIGINT capacity checks, rejects NULL or negative historical duration inputs, and uses NULL-safe current/audit comparisons. The audited schema has `order_info.gmt_create` and `order_info.gmt_modified` with `ON UPDATE CURRENT_TIMESTAMP`, so READ-02 explicitly self-assigns both columns to preserve their original values; `migrated_at` is written only to the audit table. This pull request does not modify either timestamp column DDL or the physical `drive_time` column definition. Global `gmt_create` / `gmt_modified` DDL governance remains DB-07B. Disposable synthetic databases may be reset or reseeded instead of preserving historical rows.
+
+READ-02 performance and locking review is tracked in [`benchmark/READ-02__normalize_order_drive_time_seconds.md`](benchmark/READ-02__normalize_order_drive_time_seconds.md).
 
 ## Naming and Pairing
 

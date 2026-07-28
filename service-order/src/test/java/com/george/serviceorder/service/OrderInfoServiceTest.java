@@ -13,6 +13,9 @@ import com.george.internalCommon.response.OrderDriverResponse;
 import com.george.internalCommon.response.TerminalResponse;
 import com.george.internalCommon.response.TrsearchResponse;
 import com.george.serviceorder.mapper.OrderInfoMapper;
+import com.george.serviceorder.remote.FinalizationDriverUserClient;
+import com.george.serviceorder.remote.FinalizationMapClient;
+import com.george.serviceorder.remote.FinalizationPriceClient;
 import com.george.serviceorder.remote.ServiceDriverUserClient;
 import com.george.serviceorder.remote.ServiceMapClient;
 import com.george.serviceorder.remote.ServicePriceClient;
@@ -37,6 +40,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;   // when(), verify(), any(), etc.
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -79,6 +86,15 @@ class OrderInfoServiceTest {
 
     @Mock
     ServicePriceClient servicePriceClient;
+
+    @Mock
+    FinalizationMapClient finalizationMapClient;
+
+    @Mock
+    FinalizationDriverUserClient finalizationDriverUserClient;
+
+    @Mock
+    FinalizationPriceClient finalizationPriceClient;
 
     @Mock
     StringRedisTemplate stringRedisTemplate;
@@ -248,14 +264,14 @@ class OrderInfoServiceTest {
     private void givenCarLookupSucceeds(Long carId, String tid) {
         Car car = new Car();
         car.setTid(tid);
-        when(serviceDriverUserClient.getCarById(carId)).thenReturn(ResponseResult.success(car));
+        when(finalizationDriverUserClient.getCarById(carId)).thenReturn(ResponseResult.success(car));
     }
 
     private void givenTrackLookupSucceeds(String tid, long driveMile, long driveDurationSeconds) {
         TrsearchResponse trsearchResponse = new TrsearchResponse();
         trsearchResponse.setDriveMile(driveMile);
         trsearchResponse.setDriveTime(driveDurationSeconds);
-        when(serviceMapClient.trsearch(eq(tid), anyLong(), anyLong()))
+        when(finalizationMapClient.trsearch(eq(tid), anyLong(), anyLong()))
                 .thenReturn(ResponseResult.success(trsearchResponse));
     }
 
@@ -312,6 +328,14 @@ class OrderInfoServiceTest {
         assertTrue(updateWrapper.getParamNameValuePairs().containsValue(expectedValue),
                 "Expected wrapper to contain value " + expectedValue
                         + " but found " + updateWrapper.getParamNameValuePairs());
+    }
+
+    private String readRepositoryFile(String path) throws Exception {
+        Path repositoryPath = Paths.get(path);
+        if (!Files.exists(repositoryPath)) {
+            repositoryPath = Paths.get("..", path);
+        }
+        return new String(Files.readAllBytes(repositoryPath), StandardCharsets.UTF_8);
     }
 
     // ======================== Order creation preflight failures ========================
@@ -376,13 +400,13 @@ class OrderInfoServiceTest {
         givenFinalizationClaimSucceeds();
         givenCarLookupSucceeds(carId, "tid-300");
         givenTrackLookupSucceeds("tid-300", 5000L, 600L);
-        when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
+        when(finalizationPriceClient.calculatePrice(5000, 600, "110000", "1"))
                 .thenReturn(ResponseResult.success(19.00));
 
         ResponseResult result = orderInfoService.passengerGetoff(orderRequest);
 
         assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
-        verify(servicePriceClient, times(1)).calculatePrice(5000, 600, "110000", "1");
+        verify(finalizationPriceClient, times(1)).calculatePrice(5000, 600, "110000", "1");
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
         UpdateWrapper<OrderInfo> successUpdate = captureTerminalFinalizationUpdate();
         assertTerminalCas(successUpdate, 1);
@@ -419,14 +443,14 @@ class OrderInfoServiceTest {
             givenFinalizationClaimSucceeds();
             givenCarLookupSucceeds(carId, "tid-300");
             givenTrackLookupSucceeds("tid-300", 5000L, 600L);
-            when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
+            when(finalizationPriceClient.calculatePrice(5000, 600, "110000", "1"))
                     .thenReturn(ResponseResult.success(19.00));
 
             orderInfoService.passengerGetoff(orderRequest);
 
             ArgumentCaptor<Long> starttimeCaptor = ArgumentCaptor.forClass(Long.class);
             ArgumentCaptor<Long> endtimeCaptor = ArgumentCaptor.forClass(Long.class);
-            verify(serviceMapClient, times(1)).trsearch(eq("tid-300"), starttimeCaptor.capture(), endtimeCaptor.capture());
+            verify(finalizationMapClient, times(1)).trsearch(eq("tid-300"), starttimeCaptor.capture(), endtimeCaptor.capture());
             Long actualStartTime = starttimeCaptor.getValue();
             Long actualEndTime = endtimeCaptor.getValue();
 
@@ -453,14 +477,14 @@ class OrderInfoServiceTest {
         givenFinalizableOrder(carId);
         givenFinalizationClaimSucceeds();
         givenCarLookupSucceeds(carId, "tid-300");
-        when(serviceMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
+        when(finalizationMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
                 .thenReturn(ResponseResult.fail(1402, "No track data is available for the requested interval"));
 
         ResponseResult result = orderInfoService.passengerGetoff(orderRequest);
 
         assertEquals(1402, result.getCode());
         assertEquals("No track data is available for the requested interval", result.getMessage());
-        verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        verify(finalizationPriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
         UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
         assertTerminalCas(pendingUpdate, 1);
@@ -484,14 +508,14 @@ class OrderInfoServiceTest {
         givenFinalizableOrder(carId);
         givenFinalizationClaimSucceeds();
         givenCarLookupSucceeds(carId, "tid-300");
-        when(serviceMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
+        when(finalizationMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
                 .thenReturn(ResponseResult.success(null));
 
         ResponseResult result = orderInfoService.passengerGetoff(orderRequest);
 
         assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
         assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
-        verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        verify(finalizationPriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
         UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
         assertTerminalCas(pendingUpdate, 1);
@@ -513,7 +537,7 @@ class OrderInfoServiceTest {
         assertEquals(CommonStatus.ORDER_NOT_FOUND.getMessage(), result.getMessage());
         verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
-        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+        verifyNoInteractions(finalizationDriverUserClient, finalizationMapClient, finalizationPriceClient);
     }
 
     @Test
@@ -537,7 +561,7 @@ class OrderInfoServiceTest {
             assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
             verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
             verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
-            verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+            verifyNoInteractions(finalizationDriverUserClient, finalizationMapClient, finalizationPriceClient);
         }
     }
 
@@ -553,7 +577,7 @@ class OrderInfoServiceTest {
         assertEquals(CommonStatus.ORDER_FINALIZATION_NOT_ALLOWED.getMessage(), result.getMessage());
         verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
-        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+        verifyNoInteractions(finalizationDriverUserClient, finalizationMapClient, finalizationPriceClient);
     }
 
     @Test
@@ -563,7 +587,7 @@ class OrderInfoServiceTest {
         givenFinalizationClock();
         givenFinalizableOrder(carId);
         givenFinalizationClaimSucceeds();
-        when(serviceDriverUserClient.getCarById(carId))
+        when(finalizationDriverUserClient.getCarById(carId))
                 .thenReturn(ResponseResult.fail(1501, "Driver does not exist"));
 
         ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
@@ -578,8 +602,8 @@ class OrderInfoServiceTest {
         assertSqlSetDoesNotContain(pendingUpdate, "finalization_attempts");
         assertTrue(pendingUpdate.getParamNameValuePairs().containsValue(OrderConstant.FINALIZATION_PENDING));
         assertTrue(pendingUpdate.getParamNameValuePairs().containsValue("1501:Driver does not exist"));
-        verify(serviceMapClient, never()).trsearch(anyString(), anyLong(), anyLong());
-        verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        verify(finalizationMapClient, never()).trsearch(anyString(), anyLong(), anyLong());
+        verify(finalizationPriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
     }
 
     @Test
@@ -591,7 +615,7 @@ class OrderInfoServiceTest {
         givenFinalizationClaimSucceeds();
         givenCarLookupSucceeds(carId, "tid-300");
         givenTrackLookupSucceeds("tid-300", 5000L, 600L);
-        when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
+        when(finalizationPriceClient.calculatePrice(5000, 600, "110000", "1"))
                 .thenReturn(ResponseResult.fail(1700,
                         "Downstream service returned an invalid response: key=synthetic-secret"));
 
@@ -623,7 +647,7 @@ class OrderInfoServiceTest {
         setFinalizationClock(attemptClock);
         givenFinalizableOrder(carId);
         givenFinalizationClaimSucceeds();
-        when(serviceDriverUserClient.getCarById(carId)).thenAnswer(invocation -> {
+        when(finalizationDriverUserClient.getCarById(carId)).thenAnswer(invocation -> {
             setFinalizationClock(failureClock);
             return ResponseResult.fail(1501, "Driver does not exist");
         });
@@ -650,7 +674,7 @@ class OrderInfoServiceTest {
         setFinalizationClock(attemptClock);
         givenPendingFinalizationOrder(carId, 1, localTime(attemptClock).minusSeconds(1));
         givenFinalizationClaimSucceeds();
-        when(serviceDriverUserClient.getCarById(carId)).thenAnswer(invocation -> {
+        when(finalizationDriverUserClient.getCarById(carId)).thenAnswer(invocation -> {
             setFinalizationClock(failureClock);
             return ResponseResult.fail(1501, "Driver does not exist");
         });
@@ -681,7 +705,7 @@ class OrderInfoServiceTest {
         assertEquals(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getMessage(), result.getMessage());
         verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
-        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+        verifyNoInteractions(finalizationDriverUserClient, finalizationMapClient, finalizationPriceClient);
     }
 
     @Test
@@ -696,7 +720,7 @@ class OrderInfoServiceTest {
         ArgumentCaptor<QueryWrapper> captor = ArgumentCaptor.forClass(QueryWrapper.class);
         verify(orderInfoMapper, times(1)).selectList(captor.capture());
         assertNullRetryTimeDuePredicate(captor.getValue().getSqlSegment());
-        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+        verifyNoInteractions(finalizationDriverUserClient, finalizationMapClient, finalizationPriceClient);
     }
 
     @Test
@@ -706,7 +730,7 @@ class OrderInfoServiceTest {
         givenFinalizationClock();
         givenPendingFinalizationOrder(carId, 2, LocalDateTime.now(Clock.fixed(FIXED_TRACE_END, TEST_ZONE)).minusSeconds(1));
         givenFinalizationClaimSucceeds();
-        when(serviceDriverUserClient.getCarById(carId))
+        when(finalizationDriverUserClient.getCarById(carId))
                 .thenReturn(ResponseResult.fail(1700, "Downstream service returned an invalid response"));
 
         ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
@@ -739,13 +763,302 @@ class OrderInfoServiceTest {
         assertEquals(CommonStatus.FINALIZATION_FAILED.getMessage(), result.getMessage());
         verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
-        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+        verifyNoInteractions(finalizationDriverUserClient, finalizationMapClient, finalizationPriceClient);
         UpdateWrapper<OrderInfo> failedUpdate = captureFinalizationUpdates(1).get(0);
         assertTerminalCas(failedUpdate, 3);
         assertNullRetryTimeDuePredicate(failedUpdate.getSqlSegment());
         assertSqlSetContains(failedUpdate, "order_status");
         assertSqlSetContains(failedUpdate, "finalization_next_retry_at");
         assertSqlSetContains(failedUpdate, "finalization_last_error");
+    }
+
+    @Test
+    @DisplayName("Failed finalization recovery schedules a controlled retry without remote calls")
+    void shouldScheduleRecoveryForFailedFinalization_withoutRemoteCalls() {
+        givenFinalizationClock();
+        orderInfo.setOrderStatus(OrderConstant.FINALIZATION_FAILED);
+        orderInfo.setFinalizationAttempts(3);
+        orderInfo.setFinalizationTraceEndEpochMs(1784067000000L);
+        orderInfo.setDriveMile(5000L);
+        orderInfo.setDriveTime(600L);
+        orderInfo.setPrice(19.00);
+        when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo);
+        when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
+
+        ResponseResult result = orderInfoService.scheduleFailedFinalizationRecovery(ORDER_ID);
+
+        assertEquals(CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getCode(), result.getCode());
+        assertEquals(CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getMessage(), result.getMessage());
+        verifyNoInteractions(finalizationDriverUserClient, finalizationMapClient, finalizationPriceClient);
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> recoveryUpdate = captureFinalizationUpdates(1).get(0);
+        String where = recoveryUpdate.getSqlSegment();
+        assertTrue(where.contains("id"), where);
+        assertTrue(where.contains("order_status"), where);
+        assertTrue(where.contains("finalization_attempts"), where);
+        assertWrapperContainsValue(recoveryUpdate, ORDER_ID);
+        assertWrapperContainsValue(recoveryUpdate, OrderConstant.FINALIZATION_FAILED);
+        assertWrapperContainsValue(recoveryUpdate, 3);
+        assertSqlSetContains(recoveryUpdate, "order_status");
+        assertSqlSetContains(recoveryUpdate, "finalization_attempts");
+        assertSqlSetContains(recoveryUpdate, "finalization_next_retry_at");
+        assertSqlSetContains(recoveryUpdate, "finalization_last_error");
+        assertSqlSetContains(recoveryUpdate, "gmt_modified");
+        assertSqlSetDoesNotContain(recoveryUpdate, "finalization_trace_end_epoch_ms");
+        assertSqlSetDoesNotContain(recoveryUpdate, "drive_mile");
+        assertSqlSetDoesNotContain(recoveryUpdate, "drive_time");
+        assertSqlSetDoesNotContain(recoveryUpdate, "price");
+        assertWrapperContainsValue(recoveryUpdate, OrderConstant.FINALIZATION_PENDING);
+        assertWrapperContainsValue(recoveryUpdate, 0);
+        assertWrapperContainsValue(recoveryUpdate,
+                "1609:Failed order finalization recovery is scheduled");
+    }
+
+    @Test
+    @DisplayName("Failed finalization recovery uses persisted attempts instead of current configured maximum")
+    void shouldScheduleLegacyFailedFinalization_whenConfiguredMaximumHasIncreased() {
+        givenFinalizationClock();
+        ReflectionTestUtils.setField(orderInfoService, "maxFinalizationAttempts", 5);
+        orderInfo.setOrderStatus(OrderConstant.FINALIZATION_FAILED);
+        orderInfo.setFinalizationAttempts(3);
+        when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo);
+        when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
+
+        ResponseResult result = orderInfoService.scheduleFailedFinalizationRecovery(ORDER_ID);
+
+        assertEquals(CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getCode(), result.getCode());
+        assertEquals(CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getMessage(), result.getMessage());
+        verifyNoInteractions(
+                serviceDriverUserClient,
+                serviceMapClient,
+                servicePriceClient,
+                serviceSsePushClient,
+                finalizationDriverUserClient,
+                finalizationMapClient,
+                finalizationPriceClient);
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> recoveryUpdate = captureFinalizationUpdates(1).get(0);
+        String normalizedSql = normalizedSqlSegment(recoveryUpdate.getSqlSegment());
+        assertTrue(Pattern.compile("FINALIZATION_ATTEMPTS\\s*=").matcher(normalizedSql).find(), normalizedSql);
+        assertFalse(Pattern.compile("FINALIZATION_ATTEMPTS\\s*>=").matcher(normalizedSql).find(), normalizedSql);
+        assertWrapperContainsValue(recoveryUpdate, 3);
+        assertFalse(recoveryUpdate.getParamNameValuePairs().containsValue(5),
+                "Recovery CAS must use the persisted attempts value, not the configured maximum: "
+                        + recoveryUpdate.getParamNameValuePairs());
+        assertWrapperContainsValue(recoveryUpdate, 0);
+    }
+
+    @Test
+    @DisplayName("Failed finalization recovery returns stable results when the CAS is lost")
+    void shouldReturnStableResult_whenFailedRecoveryCasIsLost() {
+        givenFinalizationClock();
+        OrderInfo failedOrder = new OrderInfo();
+        failedOrder.setId(ORDER_ID);
+        failedOrder.setOrderStatus(OrderConstant.FINALIZATION_FAILED);
+        failedOrder.setFinalizationAttempts(3);
+        OrderInfo stillFailed = new OrderInfo();
+        stillFailed.setId(ORDER_ID);
+        stillFailed.setOrderStatus(OrderConstant.FINALIZATION_FAILED);
+        stillFailed.setFinalizationAttempts(3);
+        when(orderInfoMapper.selectOne(any())).thenReturn(failedOrder).thenReturn(stillFailed);
+        when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(0);
+
+        ResponseResult stillFailedResult = orderInfoService.scheduleFailedFinalizationRecovery(ORDER_ID);
+
+        assertEquals(CommonStatus.FINALIZATION_FAILED.getCode(), stillFailedResult.getCode());
+        assertEquals(CommonStatus.FINALIZATION_FAILED.getMessage(), stillFailedResult.getMessage());
+
+        reset(orderInfoMapper, serviceDriverUserClient, serviceMapClient, servicePriceClient);
+        OrderInfo pendingAfterCasLoss = new OrderInfo();
+        pendingAfterCasLoss.setId(ORDER_ID);
+        pendingAfterCasLoss.setOrderStatus(OrderConstant.FINALIZATION_PENDING);
+        pendingAfterCasLoss.setFinalizationAttempts(0);
+        when(orderInfoMapper.selectOne(any())).thenReturn(failedOrder).thenReturn(pendingAfterCasLoss);
+        when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(0);
+
+        ResponseResult scheduledResult = orderInfoService.scheduleFailedFinalizationRecovery(ORDER_ID);
+
+        assertEquals(CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getCode(), scheduledResult.getCode());
+        assertEquals(CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getMessage(), scheduledResult.getMessage());
+        verifyNoInteractions(finalizationDriverUserClient, finalizationMapClient, finalizationPriceClient);
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+    }
+
+    @Test
+    @DisplayName("Direct retry remains rejected for failed finalization")
+    void shouldKeepDirectRetryRejectedForFailedFinalization() {
+        orderInfo.setOrderStatus(OrderConstant.FINALIZATION_FAILED);
+        when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo);
+
+        ResponseResult result = orderInfoService.retryFinalization(ORDER_ID);
+
+        assertEquals(CommonStatus.FINALIZATION_FAILED.getCode(), result.getCode());
+        assertEquals(CommonStatus.FINALIZATION_FAILED.getMessage(), result.getMessage());
+        verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verifyNoInteractions(finalizationDriverUserClient, finalizationMapClient, finalizationPriceClient);
+    }
+
+    @Test
+    @DisplayName("Default finalization policy accepts lease greater than remote deadline budget")
+    void shouldAcceptDefaultFinalizationPolicy_whenLeaseExceedsRemoteDeadlineBudget() {
+        assertDoesNotThrow(() -> orderInfoService.validateFinalizationPolicy(
+                3,
+                30L,
+                900L,
+                120L,
+                30000L,
+                2000,
+                10000,
+                2000,
+                30000,
+                2000,
+                10000));
+    }
+
+    @Test
+    @DisplayName("Finalization policy rejects lease that does not exceed remote deadline budget")
+    void shouldRejectFinalizationPolicy_whenLeaseDoesNotExceedRemoteDeadlineBudget() {
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> orderInfoService.validateFinalizationPolicy(
+                        3,
+                        30L,
+                        900L,
+                        80L,
+                        30000L,
+                        2000,
+                        10000,
+                        2000,
+                        30000,
+                        2000,
+                        10000));
+
+        assertFalse(exception.getMessage().contains("synthetic-secret"));
+    }
+
+    @Test
+    @DisplayName("ADR documents exact persisted attempts for failed-finalization recovery CAS")
+    void shouldDocumentExactPersistedAttemptsForFailedRecoveryCas() throws Exception {
+        String adr = readRepositoryFile("docs/adr/0004-finalization-recovery-policy-and-deadline.md");
+        String order04Verification = readRepositoryFile(
+                "database/verification/ORDER-04__add_order_finalization_metadata.sql");
+
+        assertTrue(adr.contains("Status 11 itself determines recovery eligibility"), adr);
+        assertTrue(adr.contains("finalization_attempts = persisted currentAttempts"), adr);
+        assertTrue(adr.contains("Raising or lowering the configured maximum attempt count"), adr);
+        assertFalse(adr.contains("finalization_attempts >= " + "configured max attempts"), adr);
+
+        assertTrue(order04Verification.contains("@order_finalization_max_attempts"), order04Verification);
+        assertTrue(order04Verification.contains("COALESCE(@order_finalization_max_attempts, 3)"),
+                order04Verification);
+        assertTrue(order04Verification.contains("finalization_attempts = 0 is legal"), order04Verification);
+        assertTrue(order04Verification.contains("finalization_attempts < 0"), order04Verification);
+        assertFalse(order04Verification.contains("finalization_attempts <" + "= 0"), order04Verification);
+        assertFalse(Pattern.compile("finalization_attempts\\s*(?:>=|>)\\s*3")
+                .matcher(order04Verification).find(), order04Verification);
+        assertTrue(order04Verification.contains("WHERE order_status = 10"), order04Verification);
+        assertTrue(order04Verification.contains("finalization_attempts > COALESCE(@order_finalization_max_attempts, 3)"),
+                order04Verification);
+        assertTrue(order04Verification.contains("finalization_next_retry_at IS NULL"), order04Verification);
+        assertTrue(order04Verification.contains("OR finalization_next_retry_at <= NOW()"), order04Verification);
+    }
+
+    @Test
+    @DisplayName("READ-02 migration rejects zero candidates without explicit acknowledgement")
+    void shouldGateRead02Migration_whenZeroCandidatesAreNotAcknowledged() throws Exception {
+        String migration = readRepositoryFile("database/migrations/READ-02__normalize_order_drive_time_seconds.sql");
+        String verification = readRepositoryFile("database/verification/READ-02__normalize_order_drive_time_seconds.sql");
+
+        assertTrue(migration.contains("@read02_allow_zero_candidates"), migration);
+        assertTrue(migration.contains("candidate_count = 0"), migration);
+        assertTrue(migration.contains("COALESCE(@read02_allow_zero_candidates, 0) <> 1"), migration);
+        assertTrue(migration.contains(
+                "READ-02 found zero candidate rows without explicit operator acknowledgement"), migration);
+        assertTrue(migration.contains("@read02_max_candidate_rows"), migration);
+        assertTrue(migration.contains("candidate count exceeds the reviewed @read02_max_candidate_rows ceiling"),
+                migration);
+        assertTrue(migration.indexOf("@read02_max_candidate_rows")
+                < migration.indexOf("CREATE TABLE IF NOT EXISTS read02_drive_time_seconds_audit"), migration);
+        assertTrue(verification.contains("read02_candidate_ceiling_status"), verification);
+        assertTrue(verification.contains("EXCEEDS_REVIEWED_MAX"), verification);
+    }
+
+    @Test
+    @DisplayName("READ-02 migration gates cutover validity and existing audit cutover consistency")
+    void shouldGateRead02Migration_onCutoverValidityAndConsistency() throws Exception {
+        String migration = readRepositoryFile("database/migrations/READ-02__normalize_order_drive_time_seconds.sql");
+
+        assertTrue(migration.contains("@read02_seconds_cutover > NOW()"), migration);
+        assertTrue(migration.contains("database wall-clock semantics"), migration);
+        assertTrue(migration.contains("seconds_cutover <> @read02_seconds_cutover"), migration);
+        assertTrue(migration.contains(
+                "READ-02 existing audit cutover does not match current @read02_seconds_cutover"), migration);
+    }
+
+    @Test
+    @DisplayName("READ-02 migration allows same-cutover rerun only after target rows match audit")
+    void shouldSupportSameCutoverCompletedRerun_inRead02Migration() throws Exception {
+        String migration = readRepositoryFile("database/migrations/READ-02__normalize_order_drive_time_seconds.sql");
+
+        assertTrue(migration.contains("read02_validate_target_rows"), migration);
+        assertTrue(migration.contains("missing_audit_count"), migration);
+        assertTrue(migration.contains("bad_normalization_count"), migration);
+        assertTrue(migration.contains("current_value_mismatch_count"), migration);
+        assertTrue(migration.contains("NOT (normalized_drive_time <=> original_drive_time * 60)"), migration);
+        assertTrue(migration.contains("NOT (o.drive_time <=> a.normalized_drive_time)"), migration);
+        assertFalse(migration.contains("@read02_candidate_count > 0 AND "
+                + "@read02_rows_updated = 0"), migration);
+    }
+
+    @Test
+    @DisplayName("READ-02 migration avoids blind column DDL and business timestamp rewrites")
+    void shouldAvoidBlindColumnDefinitionAndBusinessTimestampChanges_inRead02Migration() throws Exception {
+        String migration = readRepositoryFile("database/migrations/READ-02__normalize_order_drive_time_seconds.sql");
+        String verification = readRepositoryFile("database/verification/READ-02__normalize_order_drive_time_seconds.sql");
+
+        assertTrue(migration.contains("information_schema.columns"), migration);
+        assertTrue(migration.contains("supports only signed BIGINT order_info.drive_time"), migration);
+        assertTrue(migration.indexOf("information_schema.columns")
+                < migration.indexOf("CREATE TABLE IF NOT EXISTS read02_drive_time_seconds_audit"), migration);
+        assertTrue(migration.contains("completed pre-cutover rows with NULL drive_time"), migration);
+        assertTrue(migration.contains("completed pre-cutover rows with negative drive_time"), migration);
+        assertTrue(migration.contains("column_name IN ('gmt_create', 'gmt_modified')"), migration);
+        assertTrue(migration.contains("o.gmt_create = o.gmt_create"), migration);
+        assertTrue(migration.contains("o.gmt_modified = o.gmt_modified"), migration);
+        assertTrue(verification.contains("read02_drive_time_column_status"), verification);
+        assertTrue(verification.contains("completed_pre_cutover_rows_with_null_drive_time"), verification);
+        assertTrue(verification.contains("completed_pre_cutover_rows_with_negative_drive_time"), verification);
+        assertTrue(verification.contains("NOT (o.drive_time <=> a.normalized_drive_time)"), verification);
+        assertTrue(verification.contains("read02_zero_minute_rows"), verification);
+        assertTrue(verification.contains("gmt_create"), verification);
+        assertTrue(verification.contains("gmt_modified"), verification);
+        assertTrue(verification.contains("extra"), verification);
+        assertTrue(verification.contains("ON UPDATE CURRENT_TIMESTAMP"), verification);
+        assertTrue(verification.contains("self-assignment"), verification);
+        assertFalse(verification.contains("read02_possible_double_" + "converted_rows"), verification);
+        assertFalse(migration.contains("MODIFY COLUMN " + "drive_time"), migration);
+        assertFalse(migration.contains("o.gmt_create = " + "NOW()"), migration);
+        assertFalse(migration.contains("o.gmt_modified = " + "NOW()"), migration);
+        assertFalse(migration.contains("o.gmt_create = " + "CURRENT_TIMESTAMP"), migration);
+        assertFalse(migration.contains("o.gmt_modified = " + "CURRENT_TIMESTAMP"), migration);
+        assertFalse(verification.contains("column_comment mentions seconds"), verification);
+        assertFalse(verification.contains("column_comment"), verification);
+    }
+
+    @Test
+    @DisplayName("READ-02 benchmark plan records candidate, write-cost, chunking, and timing evidence")
+    void shouldTrackRead02BenchmarkEvidencePlan() throws Exception {
+        String benchmark = readRepositoryFile("database/benchmark/READ-02__normalize_order_drive_time_seconds.md");
+
+        assertTrue(benchmark.contains("candidate rows"), benchmark);
+        assertTrue(benchmark.contains("status distribution"), benchmark);
+        assertTrue(benchmark.contains("Audit Insert Cost"), benchmark);
+        assertTrue(benchmark.contains("Join Update Cost"), benchmark);
+        assertTrue(benchmark.contains("replication lag"), benchmark);
+        assertTrue(benchmark.contains("@read02_max_candidate_rows"), benchmark);
+        assertTrue(benchmark.contains("Single Statement vs Chunking Decision"), benchmark);
+        assertTrue(benchmark.contains("Maintenance Window"), benchmark);
+        assertTrue(benchmark.contains("Before and After Timing"), benchmark);
     }
 
     @Test
@@ -762,7 +1075,7 @@ class OrderInfoServiceTest {
         assertEquals(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getMessage(), result.getMessage());
         verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
-        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+        verifyNoInteractions(finalizationDriverUserClient, finalizationMapClient, finalizationPriceClient);
     }
 
     @Test
@@ -776,14 +1089,14 @@ class OrderInfoServiceTest {
         givenFinalizationClaimSucceeds();
         givenCarLookupSucceeds(carId, "tid-300");
         givenTrackLookupSucceeds("tid-300", 5000L, 600L);
-        when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
+        when(finalizationPriceClient.calculatePrice(5000, 600, "110000", "1"))
                 .thenReturn(ResponseResult.success(19.00));
 
         ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
 
         assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
         ArgumentCaptor<Long> endtimeCaptor = ArgumentCaptor.forClass(Long.class);
-        verify(serviceMapClient).trsearch(eq("tid-300"), anyLong(), endtimeCaptor.capture());
+        verify(finalizationMapClient).trsearch(eq("tid-300"), anyLong(), endtimeCaptor.capture());
         assertEquals(FIXED_TRACE_END.toEpochMilli(), endtimeCaptor.getValue());
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
         UpdateWrapper<OrderInfo> successUpdate = captureTerminalFinalizationUpdate();
@@ -807,7 +1120,7 @@ class OrderInfoServiceTest {
 
         assertEquals(CommonStatus.FINALIZATION_FAILED.getCode(), result.getCode());
         assertEquals(CommonStatus.FINALIZATION_FAILED.getMessage(), result.getMessage());
-        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+        verifyNoInteractions(finalizationDriverUserClient, finalizationMapClient, finalizationPriceClient);
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
         UpdateWrapper<OrderInfo> failedUpdate = captureFinalizationUpdates(1).get(0);
         assertTerminalCas(failedUpdate, 3);
@@ -836,7 +1149,7 @@ class OrderInfoServiceTest {
         when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1).thenReturn(0);
         givenCarLookupSucceeds(carId, "tid-300");
         givenTrackLookupSucceeds("tid-300", 5000L, 600L);
-        when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
+        when(finalizationPriceClient.calculatePrice(5000, 600, "110000", "1"))
                 .thenReturn(ResponseResult.success(19.00));
 
         ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
@@ -862,7 +1175,7 @@ class OrderInfoServiceTest {
         givenFinalizationClock();
         givenFinalizableOrder(carId);
         givenFinalizationClaimSucceeds();
-        when(serviceDriverUserClient.getCarById(carId))
+        when(finalizationDriverUserClient.getCarById(carId))
                 .thenThrow(new RuntimeException("key=synthetic-secret"));
 
         ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
@@ -871,8 +1184,8 @@ class OrderInfoServiceTest {
         assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
         assertFalse(result.getMessage().contains("synthetic-secret"));
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
-        verify(serviceMapClient, never()).trsearch(anyString(), anyLong(), anyLong());
-        verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        verify(finalizationMapClient, never()).trsearch(anyString(), anyLong(), anyLong());
+        verify(finalizationPriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
         UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
         assertTerminalCas(pendingUpdate, 1);
         assertSqlSetContains(pendingUpdate, "finalization_next_retry_at");
@@ -890,7 +1203,7 @@ class OrderInfoServiceTest {
         givenFinalizableOrder(carId);
         givenFinalizationClaimSucceeds();
         givenCarLookupSucceeds(carId, "tid-300");
-        when(serviceMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
+        when(finalizationMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
                 .thenThrow(new RuntimeException("query=synthetic-secret"));
 
         ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
@@ -899,7 +1212,7 @@ class OrderInfoServiceTest {
         assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
         assertFalse(result.getMessage().contains("synthetic-secret"));
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
-        verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        verify(finalizationPriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
         UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
         assertTerminalCas(pendingUpdate, 1);
         assertTrue(pendingUpdate.getParamNameValuePairs().containsValue(
@@ -916,7 +1229,7 @@ class OrderInfoServiceTest {
         givenFinalizationClaimSucceeds();
         givenCarLookupSucceeds(carId, "tid-300");
         givenTrackLookupSucceeds("tid-300", 5000L, 600L);
-        when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
+        when(finalizationPriceClient.calculatePrice(5000, 600, "110000", "1"))
                 .thenThrow(new RuntimeException("raw response key=synthetic-secret"));
 
         ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());

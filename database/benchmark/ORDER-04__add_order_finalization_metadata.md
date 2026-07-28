@@ -21,7 +21,10 @@ EXPLAIN ANALYZE
 SELECT id
 FROM order_info
 WHERE order_status = 10
-  AND finalization_next_retry_at <= ?
+  AND (
+      finalization_next_retry_at IS NULL
+      OR finalization_next_retry_at <= ?
+  )
 ORDER BY finalization_next_retry_at ASC
 LIMIT 50;
 ```
@@ -33,7 +36,10 @@ EXPLAIN
 SELECT id
 FROM order_info
 WHERE order_status = 10
-  AND finalization_next_retry_at <= ?
+  AND (
+      finalization_next_retry_at IS NULL
+      OR finalization_next_retry_at <= ?
+  )
 ORDER BY finalization_next_retry_at ASC
 LIMIT 50;
 ```
@@ -42,18 +48,29 @@ Use parameter placeholders or synthetic controlled values. Do not paste producti
 
 ## Expected Plan Hypothesis
 
-Expected:
-MySQL uses `idx_order_finalization_due` with equality on `order_status`
-and a range condition on `finalization_next_retry_at`, preserving index order
-for the `LIMIT 50` due scan.
+To be verified:
+MySQL may use `idx_order_finalization_due` with equality on `order_status`
+and a NULL/range condition on `finalization_next_retry_at` for the `LIMIT 50`
+due scan.
 
-Must be confirmed with real `EXPLAIN` / `EXPLAIN ANALYZE` output before apply.
+The actual plan, including whether filesort appears, must be recorded from real
+`EXPLAIN` / `EXPLAIN ANALYZE` output before apply. This report does not claim
+that the optimizer will avoid filesort.
 
 If the optimizer does not choose this index, do not edit the evidence to match the hypothesis. Record the actual `key`, `type`, estimated rows, actual rows, whether filesort appears, and the full relevant plan. If filesort, full table scan, or unexpectedly high rows examined appears, the migration must be reviewed again before approval.
 
 ## Write-Path Impact
 
-The migration adds three indexed columns to a secondary index and one additional metadata column:
+The migration adds 4 new metadata columns:
+
+- `finalization_attempts`
+- `finalization_next_retry_at`
+- `finalization_last_error`
+- `finalization_trace_end_epoch_ms`
+
+The due index has 3 columns: 1 existing column (`order_status`) plus 2 new
+metadata columns (`finalization_next_retry_at`, `finalization_attempts`).
+The other 2 new metadata columns are not indexed.
 
 - Each `order_info` insert must maintain the extra secondary index.
 - Finalization claim, failure, and success updates touch `order_status`, `finalization_next_retry_at`, and `finalization_attempts`, which can cause secondary-index delete/insert or page maintenance.

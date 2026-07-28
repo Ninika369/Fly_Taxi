@@ -209,7 +209,7 @@ public class OrderInfo implements Serializable {
 
     /**
      * Time spent with passengers in seconds.
-     * Legacy field and column name retained until READ-02 database migration renames it.
+     * drive_time physical name retained for compatibility; READ-02 normalizes stored values to seconds.
      */
     private Long driveTime;
 

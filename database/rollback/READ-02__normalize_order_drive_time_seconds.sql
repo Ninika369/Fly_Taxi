@@ -1,0 +1,43 @@
+-- Change ID: READ-02
+-- Title: Restore order drive_time storage representation after READ-02
+-- Owner: service-order
+-- Target database: service-order
+-- Target MySQL version: 8.0.30; reconfirm before execution.
+-- Forward migration file: database/migrations/READ-02__normalize_order_drive_time_seconds.sql
+-- Paired verification file: database/verification/READ-02__normalize_order_drive_time_seconds.sql
+-- Reversibility: PARTIAL
+-- Data-loss risk: semantic rollback can make current seconds-based code misread values.
+-- Required backup: verified pre-migration snapshot or read02_drive_time_seconds_audit.
+--
+-- ROLLBACK / RESTORE BOUNDARY
+-- READ-02 changes stored duration semantics from historical minutes to seconds.
+-- Do not blindly divide drive_time while current code is running, because the
+-- current code already interprets drive_time as seconds. Restoring the old
+-- representation is safe only after traffic is stopped and service-order has
+-- been rolled back to code that is compatible with minute-based historical
+-- storage.
+--
+-- PRECISION BOUNDARY
+-- READ-02 multiplied old values by 60 to produce minute-granularity lower-bound
+-- seconds. A restore can recover the old stored minute value from the audit
+-- table or a verified snapshot, but it cannot recover the original pre-A2
+-- sub-minute ride-duration seconds that were already lost before READ-02.
+--
+-- REQUIRED MANUAL GATES
+-- 1. Stop inbound order-finalization and payment/start-pay traffic that can read
+--    or write completed order durations.
+-- 2. Stop schedulers or workers that may finalize orders.
+-- 3. Run the paired verification file's pre-rollback assertions, including
+--    audit availability, matching cutover, NULL-safe current value matching
+--    audited normalized_drive_time, and no audit rows missing their order row.
+-- 4. Deploy code that is compatible with the old minute-based representation,
+--    while temporarily retaining READ-02 audit artifacts.
+-- 5. Restore from a verified pre-migration snapshot, or use the audited
+--    original_drive_time values for exactly the rows captured by READ-02.
+-- 6. Do not automatically divide every completed drive_time by 60; rows not
+--    captured by READ-02 may already be seconds-based.
+-- 7. Run post-rollback verification before reopening traffic.
+--
+-- This file intentionally does not perform automatic DML. MySQL DDL/DML may
+-- implicitly commit, so rehearse the restore path in a controlled environment.
+-- If rollback preconditions are not satisfied, retain seconds semantics.

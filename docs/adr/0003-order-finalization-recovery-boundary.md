@@ -1,6 +1,6 @@
 # ADR-0003: Bound Order Finalization Recovery in `service-order`
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0004
 - **Date:** 2026-07-28
 - **Decision scope:** Existing FlyTaxi Java/Spring architecture
 - **Implementation status:** Planned and implemented in Batch A6 for database state and scheduled recovery. This ADR does not authorize an unauthenticated administrator HTTP endpoint.

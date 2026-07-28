@@ -24,6 +24,7 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 
 // ---- Mockito imports ----
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;    // Tells Mockito: "create this object and inject mocks into it"
 import org.mockito.Mock;            // Tells Mockito: "create a fake version of this"
 import org.mockito.junit.jupiter.MockitoExtension;  // Activates Mockito for JUnit 5
@@ -31,9 +32,12 @@ import org.mockito.junit.jupiter.MockitoExtension;  // Activates Mockito for JUn
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;   // when(), verify(), any(), etc.
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Collections;
 import java.util.List;
+import java.util.TimeZone;
 
 /**
  * Unit tests for {@link OrderInfoService#cancel(Long, String)}.
@@ -177,6 +181,71 @@ class OrderInfoServiceTest {
         assertEquals(600L, orderInfo.getDriveTime());
         assertEquals(19.00, orderInfo.getPrice());
         verify(orderInfoMapper, times(1)).updateById(orderInfo);
+    }
+
+    @Test
+    @DisplayName("Passenger get-off uses JVM default zone for pickup and current UTC instant for trace end")
+    void shouldBuildTraceSearchWindowFromSystemDefaultZone_whenPassengerGetsOff() {
+        TimeZone originalTimeZone = TimeZone.getDefault();
+        ZoneId testZone = ZoneId.of("Pacific/Auckland");
+        TimeZone.setDefault(TimeZone.getTimeZone(testZone));
+        try {
+            Long carId = 300L;
+            LocalDateTime pickUpLocalTime = LocalDateTime.of(2026, 7, 15, 10, 0);
+            long expectedStartTime = pickUpLocalTime
+                    .atZone(testZone)
+                    .toInstant()
+                    .toEpochMilli();
+            OrderRequest orderRequest = new OrderRequest();
+            orderRequest.setOrderId(ORDER_ID);
+            orderRequest.setPassengerGetoffLongitude("174.7762");
+            orderRequest.setPassengerGetoffLatitude("-36.8519");
+
+            orderInfo.setCarId(carId);
+            orderInfo.setPickUpPassengerTime(pickUpLocalTime);
+            orderInfo.setAddress("110000");
+            orderInfo.setVehicleType("1");
+            when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo);
+
+            Car car = new Car();
+            car.setTid("tid-300");
+            when(serviceDriverUserClient.getCarById(carId)).thenReturn(ResponseResult.success(car));
+
+            TrsearchResponse trsearchResponse = new TrsearchResponse();
+            trsearchResponse.setDriveMile(5000L);
+            trsearchResponse.setDriveTime(600L);
+            when(serviceMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
+                    .thenReturn(ResponseResult.success(trsearchResponse));
+            when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
+                    .thenReturn(ResponseResult.success(19.00));
+
+            long beforeCall = Instant.now().toEpochMilli();
+            orderInfoService.passengerGetoff(orderRequest);
+            long afterCall = Instant.now().toEpochMilli();
+
+            ArgumentCaptor<Long> starttimeCaptor = ArgumentCaptor.forClass(Long.class);
+            ArgumentCaptor<Long> endtimeCaptor = ArgumentCaptor.forClass(Long.class);
+            verify(serviceMapClient, times(1)).trsearch(eq("tid-300"), starttimeCaptor.capture(), endtimeCaptor.capture());
+            Long actualStartTime = starttimeCaptor.getValue();
+            Long actualEndTime = endtimeCaptor.getValue();
+
+            assertAll(
+                    () -> assertEquals(expectedStartTime, actualStartTime,
+                            "starttime should use the JVM default zone for the stored pickup wall time; beforeCall="
+                                    + beforeCall + ", actualEndTime=" + actualEndTime + ", afterCall=" + afterCall),
+                    () -> assertTrue(actualEndTime >= beforeCall,
+                            "endtime should be at or after beforeCall; beforeCall=" + beforeCall
+                                    + ", actualEndTime=" + actualEndTime),
+                    () -> assertTrue(actualEndTime <= afterCall,
+                            "endtime should be at or before afterCall; actualEndTime=" + actualEndTime
+                                    + ", afterCall=" + afterCall),
+                    () -> assertTrue(actualEndTime > actualStartTime,
+                            "endtime should be after starttime; starttime=" + actualStartTime
+                                    + ", endtime=" + actualEndTime)
+            );
+        } finally {
+            TimeZone.setDefault(originalTimeZone);
+        }
     }
 
     // ======================== Passenger cancellation ========================

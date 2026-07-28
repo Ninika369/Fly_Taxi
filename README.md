@@ -134,16 +134,16 @@ flowchart LR
 
 ## Engineering Practices
 
-### Test Automation — 87 CI-verified tests across 15 test classes
+### Test Automation — 88 CI-verified tests across 15 test classes
 
-The CI pipeline runs root-level `mvn test` across the full 14-module Maven reactor. The repository currently has 87 CI-verified tests: 83 unit-style tests and 4 lightweight HTTP contract tests. None require a full Spring application context or external MySQL, Redis, or Nacos infrastructure. MockMvc verifies the server-side controller contract, while WireMock exercises the OpenFeign client's HTTP method, path, JSON body, content type, and response decoding. These tests currently live in `internal-common`, `service-price`, `service-order`, `service-map`, `security-support-core`, and `security-support-session`; modules without test classes still participate in the reactor and will automatically be covered as tests are added later.
+The CI pipeline runs root-level `mvn test` across the full 14-module Maven reactor. The repository currently has 88 CI-verified tests: 84 unit-style tests and 4 lightweight HTTP contract tests. None require a full Spring application context or external MySQL, Redis, or Nacos infrastructure. MockMvc verifies the server-side controller contract, while WireMock exercises the OpenFeign client's HTTP method, path, JSON body, content type, and response decoding. These tests currently live in `internal-common`, `service-price`, `service-order`, `service-map`, `security-support-core`, and `security-support-session`; modules without test classes still participate in the reactor and will automatically be covered as tests are added later.
 
 | Test Class | Module | Tests | What It Covers |
 |-----------|--------|-------|----------------|
 | `BigDecimalUtilsTest` | internal-common | 11 | Arithmetic precision — add, subtract, multiply, divide, edge cases (zero, negative, divide-by-zero) |
 | `PredictPriceServiceTest` | service-price | 18 | Pricing formula — normal trips, short trips, traffic jams, cross-hour duration, rounding boundaries (995m/1004m/1005m), duration staircase, input validation for invalid distance/duration/null inputs, regression tests for .005 precision fix |
 | `PriceRuleServiceTest` | service-price | 8 | Rule versioning — create, edit with change detection, duplicate rejection, fareType composition, version auto-increment |
-| `OrderInfoServiceTest` | service-order | 19 | Order cancellation state machine, passenger get-off duration forwarding, and dispatch lock safety — 5 passenger states, 4 driver states, time boundary (1m59s free vs 2m0s penalty), Mockito verify() for DB writes and lock release |
+| `OrderInfoServiceTest` | service-order | 20 | Order cancellation state machine, passenger get-off duration forwarding, trace-search UTC window, and dispatch lock safety — 5 passenger states, 4 driver states, time boundary (1m59s free vs 2m0s penalty), Mockito verify() for DB writes and lock release |
 | `PriceRuleControllerContractTest` | service-price | 2 | MockMvc server contracts for `POST /price-rule/is-latest` and `POST /price-rule/if-exists` — JSON request mapping, response schema, service delegation, and GET rejection |
 | `ServicePriceClientContractTest` | service-order | 3 | WireMock/OpenFeign client contracts for `POST /price-rule/is-latest` and `POST /price-rule/if-exists` — declared metadata, method, path, content type, JSON body, and response decoding |
 | `TerminalClientTest` | service-map | 2 | Amap track adapter duration units — aggregate track milliseconds first, convert once to seconds, and preserve distance in meters |
@@ -173,7 +173,7 @@ Every pull request targeting `master` and every push to `master` triggers automa
 1. **Build** — `mvn clean install -DskipTests` (compile all 14 modules)
 2. **Test** — `mvn test` (run root-level tests across the full 14-module reactor)
 
-The 87 tests currently include 83 unit-style tests and 4 lightweight contract tests in `internal-common`, `service-price`, `service-order`, `service-map`, `security-support-core`, and `security-support-session`. The remaining modules do not have test classes yet; they still participate in the Maven reactor and will be included automatically as tests are added later. Integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
+The 88 tests currently include 84 unit-style tests and 4 lightweight contract tests in `internal-common`, `service-price`, `service-order`, `service-map`, `security-support-core`, and `security-support-session`. The remaining modules do not have test classes yet; they still participate in the Maven reactor and will be included automatically as tests are added later. Integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
 
 ### API Documentation — OpenAPI / Swagger
 
@@ -201,7 +201,7 @@ This applies to datasource passwords, Nacos credentials, Redis settings, JWT sig
 
 - [`PredictPriceService.java`](service-price/src/main/java/com/george/serviceprice/service/PredictPriceService.java) — core pricing logic with BigDecimal precision fix
 - [`PredictPriceServiceTest.java`](service-price/src/test/java/com/george/serviceprice/service/PredictPriceServiceTest.java) — 18 tests including rounding boundary, input validation, cross-hour duration, and regression tests
-- [`OrderInfoServiceTest.java`](service-order/src/test/java/com/george/serviceorder/service/OrderInfoServiceTest.java) — 19 tests covering cancellation state machine, duration forwarding, and dispatch lock safety with Mockito
+- [`OrderInfoServiceTest.java`](service-order/src/test/java/com/george/serviceorder/service/OrderInfoServiceTest.java) — 20 tests covering cancellation state machine, duration forwarding, trace-search UTC window, and dispatch lock safety with Mockito
 - [`TerminalClientTest.java`](service-map/src/test/java/com/george/servicemap/remote/TerminalClientTest.java) — 2 tests covering Amap track duration conversion from milliseconds to seconds
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — CI pipeline configuration
 

@@ -100,6 +100,7 @@ class OrderInfoServiceTest {
     private static final String PASSENGER = UserIdentity.PASSENGER.getIdentity(); // "1"
     private static final String DRIVER = UserIdentity.DRIVER.getIdentity();       // "2"
     private static final Instant FIXED_TRACE_END = Instant.parse("2026-07-28T01:02:03Z");
+    private static final Instant CANCELLATION_NOW = Instant.parse("2026-07-28T01:02:03Z");
     private static final ZoneId TEST_ZONE = ZoneId.of("Pacific/Auckland");
 
     private OrderInfo orderInfo;
@@ -122,6 +123,27 @@ class OrderInfoServiceTest {
         orderInfo.setOrderStatus(OrderConstant.DRIVER_RECEIVE_ORDER);
         orderInfo.setReceiveOrderTime(LocalDateTime.now().minusMinutes(minutesAgo));
         when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(orderInfo);
+    }
+
+    private void givenAcceptedOrderSecondsAgo(long elapsedSeconds) {
+        Clock fixedClock = Clock.fixed(CANCELLATION_NOW, TEST_ZONE);
+        ReflectionTestUtils.setField(orderInfoService, "clock", fixedClock);
+        orderInfo.setOrderStatus(OrderConstant.DRIVER_RECEIVE_ORDER);
+        orderInfo.setReceiveOrderTime(LocalDateTime.now(fixedClock).minusSeconds(elapsedSeconds));
+        when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(orderInfo);
+    }
+
+    private LocalDateTime cancellationNow() {
+        return LocalDateTime.ofInstant(CANCELLATION_NOW, TEST_ZONE);
+    }
+
+    private void assertSuccessfulCancellation(ResponseResult result, int expectedCancelTypeCode, String identity) {
+        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
+        assertEquals(expectedCancelTypeCode, orderInfo.getCancelTypeCode());
+        assertEquals(cancellationNow(), orderInfo.getCancelTime());
+        assertEquals(Integer.valueOf(identity), orderInfo.getCancelOperator());
+        assertEquals(OrderConstant.ORDER_CANCEL, orderInfo.getOrderStatus());
+        verify(orderInfoMapper, times(1)).updateById(orderInfo);
     }
 
     private OrderInfo dispatchOrder() {
@@ -995,32 +1017,83 @@ class OrderInfoServiceTest {
     // This means the effective threshold is ~2 full minutes, not 1.
 
     @Test
-    @DisplayName("Time boundary: 1min 59sec after acceptance -> between=1 -> free cancellation")
-    void should_cancelFree_when_cancelledAt1Minute59Seconds() {
-        orderInfo.setOrderStatus(OrderConstant.DRIVER_RECEIVE_ORDER);
-        // 1 min 59 sec ago — ChronoUnit.MINUTES.between will return 1
-        orderInfo.setReceiveOrderTime(LocalDateTime.now().minusMinutes(1).minusSeconds(59));
-        when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(orderInfo);
+    @DisplayName("Passenger cancellation at 59 seconds remains free")
+    void shouldAllowFreePassengerCancellationAt59Seconds() {
+        givenAcceptedOrderSecondsAgo(59);
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
 
-        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
-        // CHARACTERIZATION: between=1, code checks >1, so this is FREE (not penalty)
-        // This means passengers effectively have ~2 minutes, not ~1 minute
-        assertEquals(OrderConstant.CANCEL_PASSENGER_BEFORE, orderInfo.getCancelTypeCode());
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_PASSENGER_BEFORE, PASSENGER);
     }
 
     @Test
-    @DisplayName("Time boundary: exactly 2 minutes after acceptance -> between=2 -> penalty")
-    void should_penalize_when_cancelledAtExactly2Minutes() {
-        orderInfo.setOrderStatus(OrderConstant.DRIVER_RECEIVE_ORDER);
-        orderInfo.setReceiveOrderTime(LocalDateTime.now().minusMinutes(2));
-        when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(orderInfo);
+    @DisplayName("Passenger cancellation at 60 seconds remains free")
+    void shouldAllowFreePassengerCancellationAt60Seconds() {
+        givenAcceptedOrderSecondsAgo(60);
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
 
-        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
-        assertEquals(OrderConstant.CANCEL_PASSENGER_ILLEGAL, orderInfo.getCancelTypeCode());
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_PASSENGER_BEFORE, PASSENGER);
+    }
+
+    @Test
+    @DisplayName("Passenger cancellation at 119 seconds remains free")
+    void shouldAllowFreePassengerCancellationAt119Seconds() {
+        givenAcceptedOrderSecondsAgo(119);
+
+        ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
+
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_PASSENGER_BEFORE, PASSENGER);
+    }
+
+    @Test
+    @DisplayName("Passenger cancellation at 120 seconds is penalized")
+    void shouldPenalizePassengerCancellationAt120Seconds() {
+        givenAcceptedOrderSecondsAgo(120);
+
+        ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
+
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_PASSENGER_ILLEGAL, PASSENGER);
+    }
+
+    @Test
+    @DisplayName("Driver cancellation at 59 seconds remains free")
+    void shouldAllowFreeDriverCancellationAt59Seconds() {
+        givenAcceptedOrderSecondsAgo(59);
+
+        ResponseResult result = orderInfoService.cancel(ORDER_ID, DRIVER);
+
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_DRIVER_BEFORE, DRIVER);
+    }
+
+    @Test
+    @DisplayName("Driver cancellation at 60 seconds remains free")
+    void shouldAllowFreeDriverCancellationAt60Seconds() {
+        givenAcceptedOrderSecondsAgo(60);
+
+        ResponseResult result = orderInfoService.cancel(ORDER_ID, DRIVER);
+
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_DRIVER_BEFORE, DRIVER);
+    }
+
+    @Test
+    @DisplayName("Driver cancellation at 119 seconds remains free")
+    void shouldAllowFreeDriverCancellationAt119Seconds() {
+        givenAcceptedOrderSecondsAgo(119);
+
+        ResponseResult result = orderInfoService.cancel(ORDER_ID, DRIVER);
+
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_DRIVER_BEFORE, DRIVER);
+    }
+
+    @Test
+    @DisplayName("Driver cancellation at 120 seconds is penalized")
+    void shouldPenalizeDriverCancellationAt120Seconds() {
+        givenAcceptedOrderSecondsAgo(120);
+
+        ResponseResult result = orderInfoService.cancel(ORDER_ID, DRIVER);
+
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_DRIVER_ILLEGAL, DRIVER);
     }
 
     // ======================== Verify database interaction ========================

@@ -59,8 +59,20 @@ public class PredictPriceService {
 
         // call map function to get distance and time
         ResponseResult<DirectionResponse> directionResponse = client.direction(priceDTO);
-        Integer distance = directionResponse.getData().getDistance();
-        Integer duration = directionResponse.getData().getDuration();
+        if (directionResponse == null) {
+            return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
+                    CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
+        }
+        if (directionResponse.getCode() != CommonStatus.SUCCESS.getCode()) {
+            return ResponseResult.fail(directionResponse.getCode(), directionResponse.getMessage());
+        }
+        DirectionResponse directionData = directionResponse.getData();
+        if (directionData == null || directionData.getDistance() == null || directionData.getDuration() == null) {
+            return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
+                    CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
+        }
+        Integer distance = directionData.getDistance();
+        Integer duration = directionData.getDuration();
 
         // load calculation rules
         QueryWrapper queryWrapper = new QueryWrapper();

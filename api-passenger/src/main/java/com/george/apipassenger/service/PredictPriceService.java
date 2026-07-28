@@ -1,5 +1,6 @@
 package com.george.apipassenger.service;
 
+import com.george.internalCommon.constant.CommonStatus;
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.request.PredictPriceDTO;
 import com.george.internalCommon.response.PredictPriceResponse;
@@ -42,7 +43,18 @@ public class PredictPriceService {
         priceDTO.setVehicleType(vehicleType);
         ResponseResult result = client.predictPrice(priceDTO);
 
-        // call calculation function to get predicted price
-        return ResponseResult.success(result.getData());
+        if (result == null) {
+            return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
+                    CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
+        }
+        if (result.getCode() != CommonStatus.SUCCESS.getCode()) {
+            return ResponseResult.fail(result.getCode(), result.getMessage());
+        }
+        if (result.getData() == null) {
+            return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
+                    CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
+        }
+
+        return result;
     }
 }

@@ -88,12 +88,21 @@ public class OrderInfoService {
     public ResponseResult add(OrderRequest orderRequest) {
 
         // Determine whether the service is provided in current area using the pricing rules
-        if(!isPriceRuleExists(orderRequest)){
+        ResponseResult<Boolean> priceRuleExists = isPriceRuleExists(orderRequest);
+        ResponseResult priceRuleExistsFailure = validateRequiredBooleanResponse(priceRuleExists);
+        if (priceRuleExistsFailure != null) {
+            return priceRuleExistsFailure;
+        }
+        if(!priceRuleExists.getData()){
             return ResponseResult.fail(CommonStatus.SERVICE_NOT_PROVIDED.getCode(),CommonStatus.SERVICE_NOT_PROVIDED.getMessage());
         }
 
         // Test if there are currently available drivers in the city
         ResponseResult<Boolean> availableDriver = serviceDriverUserClient.isAvailableDriver(orderRequest.getAddress());
+        ResponseResult availableDriverFailure = validateRequiredBooleanResponse(availableDriver);
+        if (availableDriverFailure != null) {
+            return availableDriverFailure;
+        }
         if (!availableDriver.getData()){
             return ResponseResult.fail(CommonStatus.CITY_NO_DRIVER.getCode(),CommonStatus.CITY_NO_DRIVER.getMessage());
         }
@@ -103,6 +112,10 @@ public class OrderInfoService {
         priceRuleIsNewRequest.setFareType(orderRequest.getFareType());
         priceRuleIsNewRequest.setFareVersion(orderRequest.getFareVersion());
         ResponseResult<Boolean> aNew = servicePriceClient.isLatest(priceRuleIsNewRequest);
+        ResponseResult latestVersionFailure = validateRequiredBooleanResponse(aNew);
+        if (latestVersionFailure != null) {
+            return latestVersionFailure;
+        }
         if (!(aNew.getData())){
             return ResponseResult.fail(CommonStatus.PRICE_RULE_CHANGED.getCode(),CommonStatus.PRICE_RULE_CHANGED.getMessage());
         }
@@ -311,7 +324,7 @@ public class OrderInfoService {
      * @param orderRequest
      * @return
      */
-    private boolean isPriceRuleExists(OrderRequest orderRequest){
+    private ResponseResult<Boolean> isPriceRuleExists(OrderRequest orderRequest){
         String fareType = orderRequest.getFareType();
         int index = fareType.indexOf("$");
         String cityCode = fareType.substring(0, index);
@@ -322,8 +335,23 @@ public class OrderInfoService {
         priceRule.setVehicleType(vehicleType);
 
         ResponseResult<Boolean> booleanResponseResult = servicePriceClient.ifPriceExists(priceRule);
-        return booleanResponseResult.getData();
+        return booleanResponseResult;
 
+    }
+
+    private ResponseResult validateRequiredBooleanResponse(ResponseResult<Boolean> response) {
+        if (response == null) {
+            return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
+                    CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
+        }
+        if (response.getCode() != CommonStatus.SUCCESS.getCode()) {
+            return ResponseResult.fail(response.getCode(), response.getMessage());
+        }
+        if (response.getData() == null) {
+            return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
+                    CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
+        }
+        return null;
     }
 
 

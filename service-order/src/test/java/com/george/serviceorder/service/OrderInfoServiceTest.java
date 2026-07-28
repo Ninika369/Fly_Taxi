@@ -146,6 +146,66 @@ class OrderInfoServiceTest {
         return ResponseResult.success(terminals);
     }
 
+    private OrderRequest newOrderRequest() {
+        OrderRequest orderRequest = new OrderRequest();
+        orderRequest.setAddress("110000");
+        orderRequest.setFareType("110000$1");
+        orderRequest.setFareVersion(3);
+        orderRequest.setPassengerId(10L);
+        orderRequest.setDeviceCode("device-10");
+        return orderRequest;
+    }
+
+    // ======================== Order creation preflight failures ========================
+
+    @Test
+    @DisplayName("Order creation preserves price-rule existence failure before insert")
+    void shouldPreservePriceRuleExistenceFailure_beforeCreatingOrder() {
+        OrderRequest orderRequest = newOrderRequest();
+        when(servicePriceClient.ifPriceExists(any()))
+                .thenReturn(ResponseResult.fail(1881, "price-rule lookup failed"));
+
+        ResponseResult result = orderInfoService.add(orderRequest);
+
+        assertEquals(1881, result.getCode());
+        assertEquals("price-rule lookup failed", result.getMessage());
+        verify(orderInfoMapper, never()).insert(any(OrderInfo.class));
+        verify(serviceDriverUserClient, never()).isAvailableDriver(anyString());
+        verify(servicePriceClient, never()).isLatest(any());
+    }
+
+    @Test
+    @DisplayName("Order creation preserves driver availability failure before insert")
+    void shouldPreserveDriverAvailabilityFailure_beforeCreatingOrder() {
+        OrderRequest orderRequest = newOrderRequest();
+        when(servicePriceClient.ifPriceExists(any())).thenReturn(ResponseResult.success(true));
+        when(serviceDriverUserClient.isAvailableDriver("110000"))
+                .thenReturn(ResponseResult.fail(1882, "driver availability failed"));
+
+        ResponseResult result = orderInfoService.add(orderRequest);
+
+        assertEquals(1882, result.getCode());
+        assertEquals("driver availability failed", result.getMessage());
+        verify(orderInfoMapper, never()).insert(any(OrderInfo.class));
+        verify(servicePriceClient, never()).isLatest(any());
+    }
+
+    @Test
+    @DisplayName("Order creation preserves price-rule version failure before insert")
+    void shouldPreservePriceRuleVersionFailure_beforeCreatingOrder() {
+        OrderRequest orderRequest = newOrderRequest();
+        when(servicePriceClient.ifPriceExists(any())).thenReturn(ResponseResult.success(true));
+        when(serviceDriverUserClient.isAvailableDriver("110000")).thenReturn(ResponseResult.success(true));
+        when(servicePriceClient.isLatest(any()))
+                .thenReturn(ResponseResult.fail(1883, "price-rule version check failed"));
+
+        ResponseResult result = orderInfoService.add(orderRequest);
+
+        assertEquals(1883, result.getCode());
+        assertEquals("price-rule version check failed", result.getMessage());
+        verify(orderInfoMapper, never()).insert(any(OrderInfo.class));
+    }
+
     // ======================== Passenger get-off pricing ========================
 
     @Test

@@ -36,6 +36,7 @@ public enum CommonStatus {
 
     // the map returned from Amap is invalid, from 1400-1499
     MAP_DISTRICT_ERROR(1400, "Request map error"),
+    MAP_DIRECTION_ERROR(1401, "Map direction request failed"),
 
 
     // indicates the relationship between the driver and the vehicle from 1500-1599
@@ -63,6 +64,9 @@ public enum CommonStatus {
     // when there is no vehicle registered in current area
     SERVICE_NOT_PROVIDED(1602, "Service is unavailable in current city"),
     ORDER_CANCEL_ERROR(1603, "Order has been canceled unsuccessfully"),
+
+    // downstream or integration response errors, from 1700-1799
+    DOWNSTREAM_RESPONSE_ERROR(1700, "Downstream service returned an invalid response"),
 
     ;
 

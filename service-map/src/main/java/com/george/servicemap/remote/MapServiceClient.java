@@ -48,9 +48,14 @@ public class MapServiceClient {
         urlBuilder.append("output=json" + "&");
         urlBuilder.append("key=" + mapKey);
 
-        // connect with the map interface
-        ResponseEntity<String> directionEntity = restTemplate.getForEntity(urlBuilder.toString(), String.class);
-        String directionString = directionEntity.getBody();
+        String directionString;
+        try {
+            // connect with the map interface
+            ResponseEntity<String> directionEntity = restTemplate.getForEntity(urlBuilder.toString(), String.class);
+            directionString = directionEntity.getBody();
+        } catch (Exception e) {
+            throw new MapDirectionException("Map direction request failed", e);
+        }
 
         // parse the response from map to get distance and duration
         DirectionResponse response = parseDirectionEntity(directionString);
@@ -65,36 +70,37 @@ public class MapServiceClient {
      * @return - an object containing essential info
      */
     public DirectionResponse parseDirectionEntity(String directionString) {
-        DirectionResponse result = null;
         try {
             JSONObject jsonObject  = new JSONObject(directionString);
-            if(jsonObject.has(AmapConfigConstant.STATUS)) {
-                int status = jsonObject.getInt(AmapConfigConstant.STATUS);
-                if (status == 1) {
-                    if (jsonObject.has(AmapConfigConstant.ROUTE)) {
-                        JSONObject routeObject = jsonObject.getJSONObject(AmapConfigConstant.ROUTE);
-                        JSONArray pathsArray = routeObject.getJSONArray(AmapConfigConstant.PATHS);
-                        JSONObject pathObject = pathsArray.getJSONObject(0);
-                        result = new DirectionResponse();
-
-                        if (pathObject.has(AmapConfigConstant.DISTANCE)) {
-                            int distance = pathObject.getInt(AmapConfigConstant.DISTANCE);
-                            result.setDistance(distance);
-                        }
-                        if (pathObject.has(AmapConfigConstant.DURATION)) {
-                            int duration = pathObject.getInt(AmapConfigConstant.DURATION);
-                            result.setDuration(duration);
-                        }
-                    }
-                }
+            if(!jsonObject.has(AmapConfigConstant.STATUS)) {
+                throw new MapDirectionException("Map direction response missing status");
+            }
+            int status = jsonObject.getInt(AmapConfigConstant.STATUS);
+            if (status != 1) {
+                throw new MapDirectionException("Map direction provider returned failure status");
+            }
+            if (!jsonObject.has(AmapConfigConstant.ROUTE)) {
+                throw new MapDirectionException("Map direction response missing route");
+            }
+            JSONObject routeObject = jsonObject.getJSONObject(AmapConfigConstant.ROUTE);
+            JSONArray pathsArray = routeObject.getJSONArray(AmapConfigConstant.PATHS);
+            if (pathsArray.length() == 0) {
+                throw new MapDirectionException("Map direction response missing paths");
+            }
+            JSONObject pathObject = pathsArray.getJSONObject(0);
+            if (!pathObject.has(AmapConfigConstant.DISTANCE) || !pathObject.has(AmapConfigConstant.DURATION)) {
+                throw new MapDirectionException("Map direction response missing distance or duration");
             }
 
+            DirectionResponse result = new DirectionResponse();
+            result.setDistance(pathObject.getInt(AmapConfigConstant.DISTANCE));
+            result.setDuration(pathObject.getInt(AmapConfigConstant.DURATION));
+            return result;
+        } catch (MapDirectionException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new MapDirectionException("Invalid map direction response", e);
         }
-        catch (Exception e) {
-
-        }
-
-        return result;
     }
 
 }

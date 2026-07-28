@@ -2,6 +2,7 @@ package com.george.servicemap.remote;
 
 
 import com.george.internalCommon.constant.AmapConfigConstant;
+import com.george.internalCommon.constant.CommonStatus;
 import com.george.internalCommon.dto.ResponseResult;
 import com.george.internalCommon.response.TerminalResponse;
 import com.george.internalCommon.response.TrsearchResponse;
@@ -155,7 +156,8 @@ public class TerminalClient {
         JSONObject data = result.getJSONObject("data");
         int counts = data.getInt("counts");
         if (counts == 0){
-            return null;
+            return ResponseResult.fail(CommonStatus.MAP_TRACK_EMPTY.getCode(),
+                    CommonStatus.MAP_TRACK_EMPTY.getMessage());
         }
         JSONArray tracks = data.getJSONArray("tracks");
         long driveMile = 0L;

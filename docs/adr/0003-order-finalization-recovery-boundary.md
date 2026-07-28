@@ -37,7 +37,9 @@ Batch A6 explicitly does not add an unauthenticated `api-boss` or administrator 
 
 An administrator recovery endpoint is deferred until ADMIN identity, RBAC, and audit logging exist. That future endpoint must reuse the internal retry service method instead of copying finalization recovery logic into a controller.
 
-The ORDER-04 database migration must be applied before starting the Batch A6 `service-order` code in an environment backed by MySQL. Rollback must happen in the opposite order: first deploy the previous `service-order` code that no longer references the finalization columns, then execute the ORDER-04 rollback artifact to remove those columns and the due-scan index.
+The ORDER-04 database migration must be applied before starting the Batch A6 `service-order` code in an environment backed by MySQL. Because Batch A6 treats statuses 6, 7, and 8 as idempotently completed, deployment must also verify that historical completed rows already have `drive_mile`, `drive_time`, and `price`. If any completed rows are missing those outputs, rollout must stop until test data is cleaned up or an explicit data-coordination plan is reviewed. This ADR does not authorize guessing or rewriting historical completed orders automatically.
+
+Rollback has a manual state gate. Operators must stop inbound finalization traffic and the Batch A6 scheduler, run the ORDER-04 pre-rollback verification, and confirm there are zero status 10 or 11 rows before dropping columns. Status 10 or 11 rows must not be automatically mapped back to status 5, 6, or any other state. If unresolved rows remain, coordination must happen while the A6 code and schema are still available, or recovery must use a verified snapshot. After the gate is clear, deploy the previous `service-order` code while temporarily retaining the extra columns, then execute the schema rollback and post-rollback verification.
 
 ## Consequences
 

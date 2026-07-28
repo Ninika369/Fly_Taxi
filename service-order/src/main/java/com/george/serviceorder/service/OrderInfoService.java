@@ -691,28 +691,28 @@ public class OrderInfoService {
         orderInfo.setPassengerGetoffLatitude(passengerGetoffLatitude);
         orderInfo.setFinalizationTraceEndEpochMs(traceEndEpochMs);
 
-        return finalizeClaimedOrder(orderInfo, attempt, now);
+        return finalizeClaimedOrder(orderInfo, attempt);
     }
 
-    private ResponseResult finalizeClaimedOrder(OrderInfo orderInfo, int attempt, LocalDateTime now) {
+    private ResponseResult finalizeClaimedOrder(OrderInfo orderInfo, int attempt) {
         ResponseResult<Car> carById = null;
         if (orderInfo.getCarId() != null) {
             try {
                 carById = serviceDriverUserClient.getCarById(orderInfo.getCarId());
             } catch (RuntimeException e) {
                 logFinalizationDependencyException(orderInfo.getId(), attempt, "getCarById", e);
-                return handleFinalizationFailure(orderInfo, attempt, downstreamResponseError(), now);
+                return handleFinalizationFailure(orderInfo, attempt, downstreamResponseError());
             }
         }
         ResponseResult carFailure = validateCarLookup(carById);
         if (carFailure != null) {
-            return handleFinalizationFailure(orderInfo, attempt, carFailure, now);
+            return handleFinalizationFailure(orderInfo, attempt, carFailure);
         }
 
         Car car = carById.getData();
         ResponseResult tracePrerequisiteFailure = validateTracePrerequisites(orderInfo, car);
         if (tracePrerequisiteFailure != null) {
-            return handleFinalizationFailure(orderInfo, attempt, tracePrerequisiteFailure, now);
+            return handleFinalizationFailure(orderInfo, attempt, tracePrerequisiteFailure);
         }
 
         Long starttime = orderInfo.getPickUpPassengerTime()
@@ -726,11 +726,11 @@ public class OrderInfoService {
             trsearch = serviceMapClient.trsearch(car.getTid(), starttime,endtime);
         } catch (RuntimeException e) {
             logFinalizationDependencyException(orderInfo.getId(), attempt, "trsearch", e);
-            return handleFinalizationFailure(orderInfo, attempt, downstreamResponseError(), now);
+            return handleFinalizationFailure(orderInfo, attempt, downstreamResponseError());
         }
         ResponseResult trackFailure = validateTrackLookup(trsearch);
         if (trackFailure != null) {
-            return handleFinalizationFailure(orderInfo, attempt, trackFailure, now);
+            return handleFinalizationFailure(orderInfo, attempt, trackFailure);
         }
         TrsearchResponse data = trsearch.getData();
         Long driveMile = data.getDriveMile();
@@ -744,13 +744,14 @@ public class OrderInfoService {
             doubleResponseResult = servicePriceClient.calculatePrice(driveMile.intValue(), driveDurationSeconds.intValue(), address, vehicleType);
         } catch (RuntimeException e) {
             logFinalizationDependencyException(orderInfo.getId(), attempt, "calculatePrice", e);
-            return handleFinalizationFailure(orderInfo, attempt, downstreamResponseError(), now);
+            return handleFinalizationFailure(orderInfo, attempt, downstreamResponseError());
         }
         ResponseResult priceFailure = validatePriceLookup(doubleResponseResult);
         if (priceFailure != null) {
-            return handleFinalizationFailure(orderInfo, attempt, priceFailure, now);
+            return handleFinalizationFailure(orderInfo, attempt, priceFailure);
         }
         Double price = doubleResponseResult.getData();
+        LocalDateTime completionTime = LocalDateTime.now(clock);
 
         UpdateWrapper<OrderInfo> updateWrapper = finalizationTerminalUpdateWrapper(orderInfo, attempt);
         updateWrapper.set("order_status", OrderConstant.PASSENGER_GETOFF)
@@ -759,7 +760,7 @@ public class OrderInfoService {
                 .set("price", price)
                 .set("finalization_next_retry_at", null)
                 .set("finalization_last_error", null)
-                .set("gmt_modified", now);
+                .set("gmt_modified", completionTime);
 
         int updated = orderInfoMapper.update(null, updateWrapper);
         if (updated == 0) {
@@ -768,7 +769,8 @@ public class OrderInfoService {
         return ResponseResult.success();
     }
 
-    private ResponseResult handleFinalizationFailure(OrderInfo orderInfo, int attempt, ResponseResult failure, LocalDateTime now) {
+    private ResponseResult handleFinalizationFailure(OrderInfo orderInfo, int attempt, ResponseResult failure) {
+        LocalDateTime failureTime = LocalDateTime.now(clock);
         ResponseResult canonicalFailure = canonicalFinalizationFailure(failure);
         String safeError = safeFinalizationError(canonicalFailure);
 
@@ -777,7 +779,7 @@ public class OrderInfoService {
             updateWrapper.set("order_status", OrderConstant.FINALIZATION_FAILED)
                     .set("finalization_next_retry_at", null)
                     .set("finalization_last_error", safeError)
-                    .set("gmt_modified", now);
+                    .set("gmt_modified", failureTime);
             int updated = orderInfoMapper.update(null, updateWrapper);
             if (updated == 0) {
                 return handleFinalizationTerminalCasMiss(orderInfo.getId());
@@ -788,12 +790,12 @@ public class OrderInfoService {
                     CommonStatus.FINALIZATION_FAILED.getMessage());
         }
 
-        LocalDateTime nextRetryAt = now.plusSeconds(finalizationBackoffSeconds(attempt));
+        LocalDateTime nextRetryAt = failureTime.plusSeconds(finalizationBackoffSeconds(attempt));
         UpdateWrapper<OrderInfo> updateWrapper = finalizationTerminalUpdateWrapper(orderInfo, attempt);
         updateWrapper.set("order_status", OrderConstant.FINALIZATION_PENDING)
                 .set("finalization_next_retry_at", nextRetryAt)
                 .set("finalization_last_error", safeError)
-                .set("gmt_modified", now);
+                .set("gmt_modified", failureTime);
         int updated = orderInfoMapper.update(null, updateWrapper);
         if (updated == 0) {
             return handleFinalizationTerminalCasMiss(orderInfo.getId());

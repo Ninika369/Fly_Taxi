@@ -12,9 +12,17 @@
 -- ROLLBACK PRECONDITIONS
 -- Execute only after confirming no required recovery process depends on the metadata.
 -- MySQL DDL may implicitly commit; rehearse this rollback in a controlled environment.
+-- Stop inbound order-finalization traffic and stop the Batch A6 scheduler before rollback.
+-- Run the paired verification file's PRE-ROLLBACK ASSERTION first.
+-- The unresolved_a6_finalization_rows result must be zero before executing ALTER TABLE.
+-- If status 10 or 11 rows remain, do not execute this rollback and do not automatically map them to status 5, 6, or any other state.
+-- Non-zero rows must be coordinated while the A6 code and schema are still available, or recovered from a verified snapshot.
 --
 -- ROLLBACK STEPS
--- Drop the paired due-scan index and all ORDER-04 metadata columns.
+-- This file is an operator-run rollback artifact; it does not automatically enforce the preconditions above.
+-- After the PRE-ROLLBACK ASSERTION is zero, deploy the previous service-order code while temporarily retaining these extra columns.
+-- Then drop the paired due-scan index and all ORDER-04 metadata columns.
+-- After rollback, run the paired verification file's POST-ROLLBACK ASSERTIONS.
 
 ALTER TABLE order_info
     DROP INDEX idx_order_finalization_due,

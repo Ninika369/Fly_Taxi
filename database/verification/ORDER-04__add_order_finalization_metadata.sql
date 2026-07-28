@@ -64,6 +64,18 @@ ORDER BY order_status;
 SELECT COUNT(*) AS rows_receiving_finalization_attempts_default
 FROM order_info;
 
+-- PRE-DEPLOYMENT ASSERTION
+-- Expected result before starting Batch A6 service-order code: zero rows.
+-- Completed orders are treated as idempotently finalized, so historical completed rows must already have finalization outputs.
+SELECT COUNT(*) AS completed_rows_missing_finalization_outputs
+FROM order_info
+WHERE order_status IN (6, 7, 8)
+  AND (
+      drive_mile IS NULL
+      OR drive_time IS NULL
+      OR price IS NULL
+  );
+
 -- POST-MIGRATION ASSERTION
 -- Expected result: four rows with the documented types, nullability, and default.
 SELECT column_name,
@@ -141,6 +153,13 @@ SELECT COUNT(*) AS completed_rows_with_next_retry
 FROM order_info
 WHERE order_status IN (6, 7, 8)
   AND finalization_next_retry_at IS NOT NULL;
+
+-- PRE-ROLLBACK ASSERTION
+-- Expected result before executing schema rollback: zero rows.
+-- Non-zero rows mean rollback must stop while A6 code and schema remain available for coordination or verified snapshot recovery.
+SELECT COUNT(*) AS unresolved_a6_finalization_rows
+FROM order_info
+WHERE order_status IN (10, 11);
 
 -- POST-ROLLBACK ASSERTION
 -- Expected result after rollback: zero rows; ORDER-04 columns should be gone.

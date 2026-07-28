@@ -200,6 +200,18 @@ class OrderInfoServiceTest {
         ReflectionTestUtils.setField(orderInfoService, "clock", Clock.fixed(FIXED_TRACE_END, TEST_ZONE));
     }
 
+    private Clock fixedClock(String instant) {
+        return Clock.fixed(Instant.parse(instant), TEST_ZONE);
+    }
+
+    private LocalDateTime localTime(Clock clock) {
+        return LocalDateTime.now(clock);
+    }
+
+    private void setFinalizationClock(Clock clock) {
+        ReflectionTestUtils.setField(orderInfoService, "clock", clock);
+    }
+
     private void givenFinalizationClaimSucceeds() {
         when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
     }
@@ -251,6 +263,12 @@ class OrderInfoServiceTest {
     private void assertSqlSetDoesNotContain(UpdateWrapper<OrderInfo> updateWrapper, String columnName) {
         String sqlSet = updateWrapper.getSqlSet();
         assertFalse(sqlSet.contains(columnName), sqlSet);
+    }
+
+    private void assertWrapperContainsValue(UpdateWrapper<OrderInfo> updateWrapper, Object expectedValue) {
+        assertTrue(updateWrapper.getParamNameValuePairs().containsValue(expectedValue),
+                "Expected wrapper to contain value " + expectedValue
+                        + " but found " + updateWrapper.getParamNameValuePairs());
     }
 
     // ======================== Order creation preflight failures ========================
@@ -551,6 +569,61 @@ class OrderInfoServiceTest {
                 "1700:Downstream service returned an invalid response"));
         assertFalse(pendingUpdate.getParamNameValuePairs().containsValue(
                 "Downstream service returned an invalid response: key=synthetic-secret"));
+    }
+
+    @Test
+    @DisplayName("Passenger get-off schedules first retry thirty seconds after failure completes")
+    void shouldScheduleFirstRetryThirtySecondsAfterFailureCompletes() {
+        Long carId = 300L;
+        Clock attemptClock = fixedClock("2026-07-28T01:02:03Z");
+        Clock failureClock = fixedClock("2026-07-28T01:02:13Z");
+        setFinalizationClock(attemptClock);
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        when(serviceDriverUserClient.getCarById(carId)).thenAnswer(invocation -> {
+            setFinalizationClock(failureClock);
+            return ResponseResult.fail(1501, "Driver does not exist");
+        });
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.DRIVER_NOT_EXISTS.getCode(), result.getCode());
+        assertEquals(CommonStatus.DRIVER_NOT_EXISTS.getMessage(), result.getMessage());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        LocalDateTime attemptTime = localTime(attemptClock);
+        LocalDateTime failureTime = localTime(failureClock);
+        assertWrapperContainsValue(pendingUpdate, failureTime.plusSeconds(30));
+        assertWrapperContainsValue(pendingUpdate, failureTime);
+        assertFalse(pendingUpdate.getParamNameValuePairs().containsValue(attemptTime.plusSeconds(30)));
+    }
+
+    @Test
+    @DisplayName("Passenger get-off schedules second retry sixty seconds after failure completes")
+    void shouldScheduleSecondRetrySixtySecondsAfterFailureCompletes() {
+        Long carId = 300L;
+        Clock attemptClock = fixedClock("2026-07-28T01:02:03Z");
+        Clock failureClock = fixedClock("2026-07-28T01:02:23Z");
+        setFinalizationClock(attemptClock);
+        givenPendingFinalizationOrder(carId, 1, localTime(attemptClock).minusSeconds(1));
+        givenFinalizationClaimSucceeds();
+        when(serviceDriverUserClient.getCarById(carId)).thenAnswer(invocation -> {
+            setFinalizationClock(failureClock);
+            return ResponseResult.fail(1501, "Driver does not exist");
+        });
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.DRIVER_NOT_EXISTS.getCode(), result.getCode());
+        assertEquals(CommonStatus.DRIVER_NOT_EXISTS.getMessage(), result.getMessage());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        LocalDateTime attemptTime = localTime(attemptClock);
+        LocalDateTime failureTime = localTime(failureClock);
+        assertTerminalCas(pendingUpdate, 2);
+        assertWrapperContainsValue(pendingUpdate, failureTime.plusSeconds(60));
+        assertWrapperContainsValue(pendingUpdate, failureTime);
+        assertFalse(pendingUpdate.getParamNameValuePairs().containsValue(attemptTime.plusSeconds(60)));
     }
 
     @Test

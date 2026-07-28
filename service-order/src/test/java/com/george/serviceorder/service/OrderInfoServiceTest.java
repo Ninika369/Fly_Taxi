@@ -1,5 +1,6 @@
 package com.george.serviceorder.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.george.internalCommon.constant.CommonStatus;
 import com.george.internalCommon.constant.OrderConstant;
@@ -43,8 +44,10 @@ import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * Unit tests for {@link OrderInfoService#cancel(Long, String)}.
@@ -285,6 +288,24 @@ class OrderInfoServiceTest {
     private void assertSqlSetDoesNotContain(UpdateWrapper<OrderInfo> updateWrapper, String columnName) {
         String sqlSet = updateWrapper.getSqlSet();
         assertFalse(sqlSet.contains(columnName), sqlSet);
+    }
+
+    private String normalizedSqlSegment(String sqlSegment) {
+        return sqlSegment
+                .replace("`", "")
+                .replaceAll("\\s+", " ")
+                .toUpperCase(Locale.ROOT);
+    }
+
+    private void assertNullRetryTimeDuePredicate(String sqlSegment) {
+        String normalizedSql = normalizedSqlSegment(sqlSegment);
+        assertTrue(normalizedSql.contains("FINALIZATION_NEXT_RETRY_AT"), normalizedSql);
+        assertTrue(normalizedSql.contains("IS NULL"), normalizedSql);
+        assertTrue(normalizedSql.contains("<="), normalizedSql);
+        assertTrue(Pattern.compile(
+                "FINALIZATION_NEXT_RETRY_AT\\s+IS\\s+NULL\\s+OR\\s+"
+                        + "FINALIZATION_NEXT_RETRY_AT\\s*<="
+        ).matcher(normalizedSql).find(), normalizedSql);
     }
 
     private void assertWrapperContainsValue(UpdateWrapper<OrderInfo> updateWrapper, Object expectedValue) {
@@ -664,6 +685,21 @@ class OrderInfoServiceTest {
     }
 
     @Test
+    @DisplayName("Due finalization scan treats null retry time as due")
+    void shouldIncludeNullRetryTimeInDueScan_whenSchedulingFinalizationRetries() {
+        LocalDateTime now = LocalDateTime.now(Clock.fixed(FIXED_TRACE_END, TEST_ZONE));
+        when(orderInfoMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+
+        int processed = orderInfoService.retryDueFinalizations(now, 50);
+
+        assertEquals(0, processed);
+        ArgumentCaptor<QueryWrapper> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(orderInfoMapper, times(1)).selectList(captor.capture());
+        assertNullRetryTimeDuePredicate(captor.getValue().getSqlSegment());
+        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+    }
+
+    @Test
     @DisplayName("Passenger get-off moves finalization to failed at maximum attempts")
     void shouldMoveToFinalizationFailed_whenMaximumAttemptsAreReached() {
         Long carId = 300L;
@@ -688,6 +724,28 @@ class OrderInfoServiceTest {
         assertTrue(failedUpdate.getParamNameValuePairs().containsValue(OrderConstant.FINALIZATION_FAILED));
         assertTrue(failedUpdate.getParamNameValuePairs().containsValue(
                 "1700:Downstream service returned an invalid response"));
+    }
+
+    @Test
+    @DisplayName("Passenger get-off moves null retry-time max-attempt finalization to failed")
+    void shouldMoveNullRetryTimeExpiredAttemptsToFailed_whenClientTouchesOrder() {
+        givenFinalizationClock();
+        givenPendingFinalizationOrder(300L, 3, null);
+        when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.FINALIZATION_FAILED.getCode(), result.getCode());
+        assertEquals(CommonStatus.FINALIZATION_FAILED.getMessage(), result.getMessage());
+        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+        UpdateWrapper<OrderInfo> failedUpdate = captureFinalizationUpdates(1).get(0);
+        assertTerminalCas(failedUpdate, 3);
+        assertNullRetryTimeDuePredicate(failedUpdate.getSqlSegment());
+        assertSqlSetContains(failedUpdate, "order_status");
+        assertSqlSetContains(failedUpdate, "finalization_next_retry_at");
+        assertSqlSetContains(failedUpdate, "finalization_last_error");
     }
 
     @Test

@@ -606,7 +606,8 @@ public class OrderInfoService {
     public int retryDueFinalizations(LocalDateTime now, int batchSize) {
         QueryWrapper<OrderInfo> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("order_status", OrderConstant.FINALIZATION_PENDING)
-                .le("finalization_next_retry_at", now)
+                .and(wrapper -> wrapper.isNull("finalization_next_retry_at")
+                        .or().le("finalization_next_retry_at", now))
                 .orderByAsc("finalization_next_retry_at")
                 .last("LIMIT " + Math.max(1, batchSize));
 
@@ -810,7 +811,8 @@ public class OrderInfoService {
         updateWrapper.eq("id", orderInfo.getId())
                 .eq("order_status", OrderConstant.FINALIZATION_PENDING)
                 .eq("finalization_attempts", currentAttempts)
-                .le("finalization_next_retry_at", now);
+                .and(wrapper -> wrapper.isNull("finalization_next_retry_at")
+                        .or().le("finalization_next_retry_at", now));
         updateWrapper.set("order_status", OrderConstant.FINALIZATION_FAILED)
                 .set("finalization_next_retry_at", null)
                 .set("finalization_last_error", safeFinalizationError(ResponseResult.fail(

@@ -222,10 +222,35 @@ class OrderInfoServiceTest {
                 .thenReturn(ResponseResult.success(trsearchResponse));
     }
 
-    private OrderInfo captureFinalizationFailureUpdate() {
-        ArgumentCaptor<OrderInfo> captor = ArgumentCaptor.forClass(OrderInfo.class);
-        verify(orderInfoMapper, times(1)).updateById(captor.capture());
-        return captor.getValue();
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private List<UpdateWrapper<OrderInfo>> captureFinalizationUpdates(int expectedCalls) {
+        ArgumentCaptor<UpdateWrapper> captor = ArgumentCaptor.forClass(UpdateWrapper.class);
+        verify(orderInfoMapper, times(expectedCalls)).update(isNull(), captor.capture());
+        return (List) captor.getAllValues();
+    }
+
+    private UpdateWrapper<OrderInfo> captureTerminalFinalizationUpdate() {
+        return captureFinalizationUpdates(2).get(1);
+    }
+
+    private void assertTerminalCas(UpdateWrapper<OrderInfo> updateWrapper, int attempt) {
+        String where = updateWrapper.getSqlSegment();
+        assertTrue(where.contains("id"), where);
+        assertTrue(where.contains("order_status"), where);
+        assertTrue(where.contains("finalization_attempts"), where);
+        assertTrue(updateWrapper.getParamNameValuePairs().containsValue(ORDER_ID));
+        assertTrue(updateWrapper.getParamNameValuePairs().containsValue(OrderConstant.FINALIZATION_PENDING));
+        assertTrue(updateWrapper.getParamNameValuePairs().containsValue(attempt));
+    }
+
+    private void assertSqlSetContains(UpdateWrapper<OrderInfo> updateWrapper, String columnName) {
+        String sqlSet = updateWrapper.getSqlSet();
+        assertTrue(sqlSet.contains(columnName), sqlSet);
+    }
+
+    private void assertSqlSetDoesNotContain(UpdateWrapper<OrderInfo> updateWrapper, String columnName) {
+        String sqlSet = updateWrapper.getSqlSet();
+        assertFalse(sqlSet.contains(columnName), sqlSet);
     }
 
     // ======================== Order creation preflight failures ========================
@@ -297,15 +322,20 @@ class OrderInfoServiceTest {
 
         assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
         verify(servicePriceClient, times(1)).calculatePrice(5000, 600, "110000", "1");
-        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
-        ArgumentCaptor<OrderInfo> successCaptor = ArgumentCaptor.forClass(OrderInfo.class);
-        verify(orderInfoMapper, times(1)).updateById(successCaptor.capture());
-        OrderInfo successUpdate = successCaptor.getValue();
-        assertEquals(OrderConstant.PASSENGER_GETOFF, successUpdate.getOrderStatus());
-        assertEquals(1, successUpdate.getFinalizationAttempts());
-        assertEquals(FIXED_TRACE_END.toEpochMilli(), successUpdate.getFinalizationTraceEndEpochMs());
-        assertEquals(600L, successUpdate.getDriveTime());
-        assertEquals(19.00, successUpdate.getPrice());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> successUpdate = captureTerminalFinalizationUpdate();
+        assertTerminalCas(successUpdate, 1);
+        assertSqlSetContains(successUpdate, "order_status");
+        assertSqlSetContains(successUpdate, "drive_mile");
+        assertSqlSetContains(successUpdate, "drive_time");
+        assertSqlSetContains(successUpdate, "price");
+        assertSqlSetContains(successUpdate, "finalization_next_retry_at");
+        assertSqlSetContains(successUpdate, "finalization_last_error");
+        assertSqlSetContains(successUpdate, "gmt_modified");
+        assertSqlSetDoesNotContain(successUpdate, "finalization_attempts");
+        assertTrue(successUpdate.getParamNameValuePairs().containsValue(OrderConstant.PASSENGER_GETOFF));
+        assertTrue(successUpdate.getParamNameValuePairs().containsValue(600L));
+        assertTrue(successUpdate.getParamNameValuePairs().containsValue(19.00));
     }
 
     @Test
@@ -370,14 +400,18 @@ class OrderInfoServiceTest {
         assertEquals(1402, result.getCode());
         assertEquals("No track data is available for the requested interval", result.getMessage());
         verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
-        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
-        OrderInfo pendingUpdate = captureFinalizationFailureUpdate();
-        assertEquals(OrderConstant.FINALIZATION_PENDING, pendingUpdate.getOrderStatus());
-        assertEquals(1, pendingUpdate.getFinalizationAttempts());
-        assertNotNull(pendingUpdate.getFinalizationNextRetryAt());
-        assertEquals("1402:No track data is available for the requested interval",
-                pendingUpdate.getFinalizationLastError());
-        assertNull(pendingUpdate.getPrice());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        assertTerminalCas(pendingUpdate, 1);
+        assertSqlSetContains(pendingUpdate, "order_status");
+        assertSqlSetContains(pendingUpdate, "finalization_next_retry_at");
+        assertSqlSetContains(pendingUpdate, "finalization_last_error");
+        assertSqlSetContains(pendingUpdate, "gmt_modified");
+        assertSqlSetDoesNotContain(pendingUpdate, "price");
+        assertSqlSetDoesNotContain(pendingUpdate, "finalization_attempts");
+        assertTrue(pendingUpdate.getParamNameValuePairs().containsValue(OrderConstant.FINALIZATION_PENDING));
+        assertTrue(pendingUpdate.getParamNameValuePairs().containsValue(
+                "1402:No track data is available for the requested interval"));
     }
 
     @Test
@@ -397,14 +431,14 @@ class OrderInfoServiceTest {
         assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
         assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
         verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
-        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
-        OrderInfo pendingUpdate = captureFinalizationFailureUpdate();
-        assertEquals(OrderConstant.FINALIZATION_PENDING, pendingUpdate.getOrderStatus());
-        assertEquals(1, pendingUpdate.getFinalizationAttempts());
-        assertNotNull(pendingUpdate.getFinalizationNextRetryAt());
-        assertEquals("1700:Downstream service returned an invalid response",
-                pendingUpdate.getFinalizationLastError());
-        assertNull(pendingUpdate.getPrice());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        assertTerminalCas(pendingUpdate, 1);
+        assertSqlSetContains(pendingUpdate, "finalization_next_retry_at");
+        assertSqlSetContains(pendingUpdate, "finalization_last_error");
+        assertSqlSetDoesNotContain(pendingUpdate, "price");
+        assertTrue(pendingUpdate.getParamNameValuePairs().containsValue(
+                "1700:Downstream service returned an invalid response"));
     }
 
     @Test
@@ -475,12 +509,14 @@ class OrderInfoServiceTest {
 
         assertEquals(1501, result.getCode());
         assertEquals("Driver does not exist", result.getMessage());
-        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
-        OrderInfo pendingUpdate = captureFinalizationFailureUpdate();
-        assertEquals(OrderConstant.FINALIZATION_PENDING, pendingUpdate.getOrderStatus());
-        assertEquals(1, pendingUpdate.getFinalizationAttempts());
-        assertNotNull(pendingUpdate.getFinalizationNextRetryAt());
-        assertEquals("1501:Driver does not exist", pendingUpdate.getFinalizationLastError());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        assertTerminalCas(pendingUpdate, 1);
+        assertSqlSetContains(pendingUpdate, "finalization_next_retry_at");
+        assertSqlSetContains(pendingUpdate, "finalization_last_error");
+        assertSqlSetDoesNotContain(pendingUpdate, "finalization_attempts");
+        assertTrue(pendingUpdate.getParamNameValuePairs().containsValue(OrderConstant.FINALIZATION_PENDING));
+        assertTrue(pendingUpdate.getParamNameValuePairs().containsValue("1501:Driver does not exist"));
         verify(serviceMapClient, never()).trsearch(anyString(), anyLong(), anyLong());
         verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
     }
@@ -501,15 +537,20 @@ class OrderInfoServiceTest {
         ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
 
         assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
-        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
-        OrderInfo pendingUpdate = captureFinalizationFailureUpdate();
-        assertEquals(OrderConstant.FINALIZATION_PENDING, pendingUpdate.getOrderStatus());
-        assertEquals(1, pendingUpdate.getFinalizationAttempts());
-        assertNotNull(pendingUpdate.getFinalizationNextRetryAt());
-        assertEquals("1700:Downstream service returned an invalid response",
-                pendingUpdate.getFinalizationLastError());
-        assertFalse(pendingUpdate.getFinalizationLastError().contains("synthetic-secret"));
-        assertNull(pendingUpdate.getPrice());
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
+        assertFalse(result.getMessage().contains("synthetic-secret"));
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        assertTerminalCas(pendingUpdate, 1);
+        assertSqlSetContains(pendingUpdate, "finalization_next_retry_at");
+        assertSqlSetContains(pendingUpdate, "finalization_last_error");
+        assertSqlSetDoesNotContain(pendingUpdate, "price");
+        assertSqlSetDoesNotContain(pendingUpdate, "finalization_attempts");
+        assertTrue(pendingUpdate.getParamNameValuePairs().containsValue(OrderConstant.FINALIZATION_PENDING));
+        assertTrue(pendingUpdate.getParamNameValuePairs().containsValue(
+                "1700:Downstream service returned an invalid response"));
+        assertFalse(pendingUpdate.getParamNameValuePairs().containsValue(
+                "Downstream service returned an invalid response: key=synthetic-secret"));
     }
 
     @Test
@@ -541,13 +582,17 @@ class OrderInfoServiceTest {
 
         assertEquals(CommonStatus.FINALIZATION_FAILED.getCode(), result.getCode());
         assertEquals(CommonStatus.FINALIZATION_FAILED.getMessage(), result.getMessage());
-        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
-        OrderInfo failedUpdate = captureFinalizationFailureUpdate();
-        assertEquals(OrderConstant.FINALIZATION_FAILED, failedUpdate.getOrderStatus());
-        assertEquals(3, failedUpdate.getFinalizationAttempts());
-        assertNull(failedUpdate.getFinalizationNextRetryAt());
-        assertEquals("1700:Downstream service returned an invalid response",
-                failedUpdate.getFinalizationLastError());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> failedUpdate = captureTerminalFinalizationUpdate();
+        assertTerminalCas(failedUpdate, 3);
+        assertSqlSetContains(failedUpdate, "order_status");
+        assertSqlSetContains(failedUpdate, "finalization_next_retry_at");
+        assertSqlSetContains(failedUpdate, "finalization_last_error");
+        assertSqlSetContains(failedUpdate, "gmt_modified");
+        assertSqlSetDoesNotContain(failedUpdate, "finalization_attempts");
+        assertTrue(failedUpdate.getParamNameValuePairs().containsValue(OrderConstant.FINALIZATION_FAILED));
+        assertTrue(failedUpdate.getParamNameValuePairs().containsValue(
+                "1700:Downstream service returned an invalid response"));
     }
 
     @Test
@@ -587,11 +632,151 @@ class OrderInfoServiceTest {
         ArgumentCaptor<Long> endtimeCaptor = ArgumentCaptor.forClass(Long.class);
         verify(serviceMapClient).trsearch(eq("tid-300"), anyLong(), endtimeCaptor.capture());
         assertEquals(FIXED_TRACE_END.toEpochMilli(), endtimeCaptor.getValue());
-        ArgumentCaptor<OrderInfo> successCaptor = ArgumentCaptor.forClass(OrderInfo.class);
-        verify(orderInfoMapper).updateById(successCaptor.capture());
-        assertEquals("174.7000", successCaptor.getValue().getPassengerGetoffLongitude());
-        assertEquals("-36.8000", successCaptor.getValue().getPassengerGetoffLatitude());
-        assertEquals(2, successCaptor.getValue().getFinalizationAttempts());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> successUpdate = captureTerminalFinalizationUpdate();
+        assertTerminalCas(successUpdate, 2);
+        assertSqlSetContains(successUpdate, "finalization_next_retry_at");
+        assertSqlSetContains(successUpdate, "finalization_last_error");
+        assertSqlSetDoesNotContain(successUpdate, "passenger_getoff_longitude");
+        assertSqlSetDoesNotContain(successUpdate, "passenger_getoff_latitude");
+        assertSqlSetDoesNotContain(successUpdate, "finalization_attempts");
+    }
+
+    @Test
+    @DisplayName("Passenger get-off fails expired third attempt without remote calls")
+    void shouldMoveExpiredThirdAttemptLeaseToFailed_withoutRemoteCalls() {
+        givenFinalizationClock();
+        givenPendingFinalizationOrder(300L, 3,
+                LocalDateTime.now(Clock.fixed(FIXED_TRACE_END, TEST_ZONE)).minusSeconds(1));
+        when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.FINALIZATION_FAILED.getCode(), result.getCode());
+        assertEquals(CommonStatus.FINALIZATION_FAILED.getMessage(), result.getMessage());
+        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> failedUpdate = captureFinalizationUpdates(1).get(0);
+        assertTerminalCas(failedUpdate, 3);
+        assertTrue(failedUpdate.getSqlSegment().contains("finalization_next_retry_at"));
+        assertSqlSetContains(failedUpdate, "order_status");
+        assertSqlSetContains(failedUpdate, "finalization_next_retry_at");
+        assertSqlSetContains(failedUpdate, "finalization_last_error");
+        assertSqlSetContains(failedUpdate, "gmt_modified");
+        assertSqlSetDoesNotContain(failedUpdate, "finalization_attempts");
+        assertTrue(failedUpdate.getParamNameValuePairs().containsValue(OrderConstant.FINALIZATION_FAILED));
+        assertTrue(failedUpdate.getParamNameValuePairs().containsValue(
+                "1605:Order finalization failed after maximum attempts"));
+    }
+
+    @Test
+    @DisplayName("Passenger get-off does not overwrite state when terminal CAS is lost")
+    void shouldReturnRetryScheduledAndNotOverwriteAttempt_whenTerminalCasIsLost() {
+        Long carId = 300L;
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        OrderInfo latestOrder = new OrderInfo();
+        latestOrder.setId(ORDER_ID);
+        latestOrder.setOrderStatus(OrderConstant.FINALIZATION_PENDING);
+        latestOrder.setFinalizationAttempts(2);
+        when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo).thenReturn(latestOrder);
+        when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1).thenReturn(0);
+        givenCarLookupSucceeds(carId, "tid-300");
+        givenTrackLookupSucceeds("tid-300", 5000L, 600L);
+        when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
+                .thenReturn(ResponseResult.success(19.00));
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getCode(), result.getCode());
+        assertEquals(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getMessage(), result.getMessage());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> terminalUpdate = captureTerminalFinalizationUpdate();
+        assertTerminalCas(terminalUpdate, 1);
+        assertSqlSetContains(terminalUpdate, "order_status");
+        assertSqlSetContains(terminalUpdate, "drive_mile");
+        assertSqlSetContains(terminalUpdate, "drive_time");
+        assertSqlSetContains(terminalUpdate, "price");
+        assertSqlSetContains(terminalUpdate, "finalization_next_retry_at");
+        assertSqlSetContains(terminalUpdate, "finalization_last_error");
+        assertSqlSetDoesNotContain(terminalUpdate, "finalization_attempts");
+    }
+
+    @Test
+    @DisplayName("Passenger get-off turns car lookup exception into safe pending finalization")
+    void shouldPersistPendingFinalization_whenCarLookupThrowsRuntimeException() {
+        Long carId = 300L;
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        when(serviceDriverUserClient.getCarById(carId))
+                .thenThrow(new RuntimeException("key=synthetic-secret"));
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
+        assertFalse(result.getMessage().contains("synthetic-secret"));
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verify(serviceMapClient, never()).trsearch(anyString(), anyLong(), anyLong());
+        verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        assertTerminalCas(pendingUpdate, 1);
+        assertSqlSetContains(pendingUpdate, "finalization_next_retry_at");
+        assertSqlSetContains(pendingUpdate, "finalization_last_error");
+        assertTrue(pendingUpdate.getParamNameValuePairs().containsValue(
+                "1700:Downstream service returned an invalid response"));
+        assertFalse(pendingUpdate.getParamNameValuePairs().containsValue("key=synthetic-secret"));
+    }
+
+    @Test
+    @DisplayName("Passenger get-off turns trace-search exception into safe pending finalization")
+    void shouldPersistPendingFinalization_whenTraceSearchThrowsRuntimeException() {
+        Long carId = 300L;
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
+        when(serviceMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
+                .thenThrow(new RuntimeException("query=synthetic-secret"));
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
+        assertFalse(result.getMessage().contains("synthetic-secret"));
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        assertTerminalCas(pendingUpdate, 1);
+        assertTrue(pendingUpdate.getParamNameValuePairs().containsValue(
+                "1700:Downstream service returned an invalid response"));
+        assertFalse(pendingUpdate.getParamNameValuePairs().containsValue("query=synthetic-secret"));
+    }
+
+    @Test
+    @DisplayName("Passenger get-off turns price exception into safe pending finalization")
+    void shouldPersistPendingFinalization_whenPriceCalculationThrowsRuntimeException() {
+        Long carId = 300L;
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
+        givenTrackLookupSucceeds("tid-300", 5000L, 600L);
+        when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
+                .thenThrow(new RuntimeException("raw response key=synthetic-secret"));
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
+        assertFalse(result.getMessage().contains("synthetic-secret"));
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        assertTerminalCas(pendingUpdate, 1);
+        assertTrue(pendingUpdate.getParamNameValuePairs().containsValue(
+                "1700:Downstream service returned an invalid response"));
+        assertFalse(pendingUpdate.getParamNameValuePairs().containsValue("raw response key=synthetic-secret"));
     }
 
     // ======================== Passenger cancellation ========================

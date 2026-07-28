@@ -37,6 +37,8 @@ Batch A6 explicitly does not add an unauthenticated `api-boss` or administrator 
 
 An administrator recovery endpoint is deferred until ADMIN identity, RBAC, and audit logging exist. That future endpoint must reuse the internal retry service method instead of copying finalization recovery logic into a controller.
 
+The ORDER-04 database migration must be applied before starting the Batch A6 `service-order` code in an environment backed by MySQL. Rollback must happen in the opposite order: first deploy the previous `service-order` code that no longer references the finalization columns, then execute the ORDER-04 rollback artifact to remove those columns and the due-scan index.
+
 ## Consequences
 
 Positive:

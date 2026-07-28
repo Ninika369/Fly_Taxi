@@ -632,6 +632,11 @@ public class OrderInfoService {
     private ResponseResult claimAndFinalize(OrderInfo orderInfo, OrderRequest orderRequest, LocalDateTime now) {
         Integer currentStatus = orderInfo.getOrderStatus();
         int currentAttempts = currentFinalizationAttempts(orderInfo);
+        if (isOrderStatus(currentStatus, OrderConstant.FINALIZATION_PENDING)
+                && currentAttempts >= MAX_FINALIZATION_ATTEMPTS
+                && isFinalizationDue(orderInfo, now)) {
+            return moveExpiredFinalizationToFailed(orderInfo, currentAttempts, now);
+        }
         if (currentAttempts >= MAX_FINALIZATION_ATTEMPTS) {
             return ResponseResult.fail(CommonStatus.FINALIZATION_FAILED.getCode(),
                     CommonStatus.FINALIZATION_FAILED.getMessage());
@@ -692,7 +697,12 @@ public class OrderInfoService {
     private ResponseResult finalizeClaimedOrder(OrderInfo orderInfo, int attempt, LocalDateTime now) {
         ResponseResult<Car> carById = null;
         if (orderInfo.getCarId() != null) {
-            carById = serviceDriverUserClient.getCarById(orderInfo.getCarId());
+            try {
+                carById = serviceDriverUserClient.getCarById(orderInfo.getCarId());
+            } catch (RuntimeException e) {
+                logFinalizationDependencyException(orderInfo.getId(), attempt, "getCarById", e);
+                return handleFinalizationFailure(orderInfo, attempt, downstreamResponseError(), now);
+            }
         }
         ResponseResult carFailure = validateCarLookup(carById);
         if (carFailure != null) {
@@ -711,7 +721,13 @@ public class OrderInfoService {
                 .toEpochMilli();
         Long endtime = orderInfo.getFinalizationTraceEndEpochMs();
 
-        ResponseResult<TrsearchResponse> trsearch = serviceMapClient.trsearch(car.getTid(), starttime,endtime);
+        ResponseResult<TrsearchResponse> trsearch;
+        try {
+            trsearch = serviceMapClient.trsearch(car.getTid(), starttime,endtime);
+        } catch (RuntimeException e) {
+            logFinalizationDependencyException(orderInfo.getId(), attempt, "trsearch", e);
+            return handleFinalizationFailure(orderInfo, attempt, downstreamResponseError(), now);
+        }
         ResponseResult trackFailure = validateTrackLookup(trsearch);
         if (trackFailure != null) {
             return handleFinalizationFailure(orderInfo, attempt, trackFailure, now);
@@ -723,46 +739,119 @@ public class OrderInfoService {
         // get the actual price
         String address = orderInfo.getAddress();
         String vehicleType = orderInfo.getVehicleType();
-        ResponseResult<Double> doubleResponseResult = servicePriceClient.calculatePrice(driveMile.intValue(), driveDurationSeconds.intValue(), address, vehicleType);
+        ResponseResult<Double> doubleResponseResult;
+        try {
+            doubleResponseResult = servicePriceClient.calculatePrice(driveMile.intValue(), driveDurationSeconds.intValue(), address, vehicleType);
+        } catch (RuntimeException e) {
+            logFinalizationDependencyException(orderInfo.getId(), attempt, "calculatePrice", e);
+            return handleFinalizationFailure(orderInfo, attempt, downstreamResponseError(), now);
+        }
         ResponseResult priceFailure = validatePriceLookup(doubleResponseResult);
         if (priceFailure != null) {
             return handleFinalizationFailure(orderInfo, attempt, priceFailure, now);
         }
         Double price = doubleResponseResult.getData();
 
-        orderInfo.setDriveMile(driveMile);
-        orderInfo.setDriveTime(driveDurationSeconds);
-        orderInfo.setPrice(price);
-        orderInfo.setOrderStatus(OrderConstant.PASSENGER_GETOFF);
-        orderInfo.setFinalizationNextRetryAt(null);
-        orderInfo.setFinalizationLastError(null);
-        orderInfo.setGmtModified(now);
+        UpdateWrapper<OrderInfo> updateWrapper = finalizationTerminalUpdateWrapper(orderInfo, attempt);
+        updateWrapper.set("order_status", OrderConstant.PASSENGER_GETOFF)
+                .set("drive_mile", driveMile)
+                .set("drive_time", driveDurationSeconds)
+                .set("price", price)
+                .set("finalization_next_retry_at", null)
+                .set("finalization_last_error", null)
+                .set("gmt_modified", now);
 
-        orderInfoMapper.updateById(orderInfo);
+        int updated = orderInfoMapper.update(null, updateWrapper);
+        if (updated == 0) {
+            return handleFinalizationTerminalCasMiss(orderInfo.getId());
+        }
         return ResponseResult.success();
     }
 
     private ResponseResult handleFinalizationFailure(OrderInfo orderInfo, int attempt, ResponseResult failure, LocalDateTime now) {
-        orderInfo.setFinalizationLastError(safeFinalizationError(failure));
-        orderInfo.setGmtModified(now);
+        ResponseResult canonicalFailure = canonicalFinalizationFailure(failure);
+        String safeError = safeFinalizationError(canonicalFailure);
 
         if (attempt >= MAX_FINALIZATION_ATTEMPTS) {
-            orderInfo.setOrderStatus(OrderConstant.FINALIZATION_FAILED);
-            orderInfo.setFinalizationNextRetryAt(null);
-            orderInfoMapper.updateById(orderInfo);
+            UpdateWrapper<OrderInfo> updateWrapper = finalizationTerminalUpdateWrapper(orderInfo, attempt);
+            updateWrapper.set("order_status", OrderConstant.FINALIZATION_FAILED)
+                    .set("finalization_next_retry_at", null)
+                    .set("finalization_last_error", safeError)
+                    .set("gmt_modified", now);
+            int updated = orderInfoMapper.update(null, updateWrapper);
+            if (updated == 0) {
+                return handleFinalizationTerminalCasMiss(orderInfo.getId());
+            }
             log.warn("Order finalization reached retry limit; orderId={}, attempt={}, responseCode={}",
-                    orderInfo.getId(), attempt, failure.getCode());
+                    orderInfo.getId(), attempt, canonicalFailure.getCode());
             return ResponseResult.fail(CommonStatus.FINALIZATION_FAILED.getCode(),
                     CommonStatus.FINALIZATION_FAILED.getMessage());
         }
 
         LocalDateTime nextRetryAt = now.plusSeconds(finalizationBackoffSeconds(attempt));
-        orderInfo.setOrderStatus(OrderConstant.FINALIZATION_PENDING);
-        orderInfo.setFinalizationNextRetryAt(nextRetryAt);
-        orderInfoMapper.updateById(orderInfo);
+        UpdateWrapper<OrderInfo> updateWrapper = finalizationTerminalUpdateWrapper(orderInfo, attempt);
+        updateWrapper.set("order_status", OrderConstant.FINALIZATION_PENDING)
+                .set("finalization_next_retry_at", nextRetryAt)
+                .set("finalization_last_error", safeError)
+                .set("gmt_modified", now);
+        int updated = orderInfoMapper.update(null, updateWrapper);
+        if (updated == 0) {
+            return handleFinalizationTerminalCasMiss(orderInfo.getId());
+        }
         log.warn("Order finalization scheduled for retry; orderId={}, attempt={}, responseCode={}, nextRetryAt={}",
-                orderInfo.getId(), attempt, failure.getCode(), nextRetryAt);
-        return ResponseResult.fail(failure.getCode(), failure.getMessage());
+                orderInfo.getId(), attempt, canonicalFailure.getCode(), nextRetryAt);
+        return ResponseResult.fail(canonicalFailure.getCode(), canonicalFailure.getMessage());
+    }
+
+    private ResponseResult moveExpiredFinalizationToFailed(OrderInfo orderInfo, int currentAttempts, LocalDateTime now) {
+        UpdateWrapper<OrderInfo> updateWrapper = new UpdateWrapper<>();
+        updateWrapper.eq("id", orderInfo.getId())
+                .eq("order_status", OrderConstant.FINALIZATION_PENDING)
+                .eq("finalization_attempts", currentAttempts)
+                .le("finalization_next_retry_at", now);
+        updateWrapper.set("order_status", OrderConstant.FINALIZATION_FAILED)
+                .set("finalization_next_retry_at", null)
+                .set("finalization_last_error", safeFinalizationError(ResponseResult.fail(
+                        CommonStatus.FINALIZATION_FAILED.getCode(),
+                        CommonStatus.FINALIZATION_FAILED.getMessage())))
+                .set("gmt_modified", now);
+
+        int updated = orderInfoMapper.update(null, updateWrapper);
+        if (updated == 0) {
+            return ResponseResult.fail(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getCode(),
+                    CommonStatus.FINALIZATION_RETRY_SCHEDULED.getMessage());
+        }
+        return ResponseResult.fail(CommonStatus.FINALIZATION_FAILED.getCode(),
+                CommonStatus.FINALIZATION_FAILED.getMessage());
+    }
+
+    private UpdateWrapper<OrderInfo> finalizationTerminalUpdateWrapper(OrderInfo orderInfo, int attempt) {
+        UpdateWrapper<OrderInfo> updateWrapper = new UpdateWrapper<>();
+        updateWrapper.eq("id", orderInfo.getId())
+                .eq("order_status", OrderConstant.FINALIZATION_PENDING)
+                .eq("finalization_attempts", attempt);
+        return updateWrapper;
+    }
+
+    private ResponseResult handleFinalizationTerminalCasMiss(Long orderId) {
+        OrderInfo latest = selectOrderById(orderId);
+        if (latest != null) {
+            Integer latestStatus = latest.getOrderStatus();
+            if (isFinalizationIdempotentSuccess(latestStatus)) {
+                return ResponseResult.success();
+            }
+            if (isOrderStatus(latestStatus, OrderConstant.FINALIZATION_FAILED)) {
+                return ResponseResult.fail(CommonStatus.FINALIZATION_FAILED.getCode(),
+                        CommonStatus.FINALIZATION_FAILED.getMessage());
+            }
+        }
+        return ResponseResult.fail(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getCode(),
+                CommonStatus.FINALIZATION_RETRY_SCHEDULED.getMessage());
+    }
+
+    private void logFinalizationDependencyException(Long orderId, int attempt, String dependencyName, RuntimeException e) {
+        log.warn("Order finalization dependency failed; orderId={}, attempt={}, dependency={}, exceptionType={}",
+                orderId, attempt, dependencyName, e.getClass().getSimpleName());
     }
 
     private OrderInfo selectOrderById(Long orderId) {
@@ -866,20 +955,38 @@ public class OrderInfoService {
                 CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
     }
 
+    private ResponseResult canonicalFinalizationFailure(ResponseResult failure) {
+        if (failure == null) {
+            return downstreamResponseError();
+        }
+        CommonStatus knownStatus = findCommonStatus(failure.getCode());
+        if (knownStatus == null) {
+            return downstreamResponseError();
+        }
+        return ResponseResult.fail(knownStatus.getCode(), knownStatus.getMessage());
+    }
+
     private String safeFinalizationError(ResponseResult failure) {
         int code = failure.getCode();
         String message = CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage();
-        for (CommonStatus status : CommonStatus.values()) {
-            if (status.getCode() == code) {
-                message = status.getMessage();
-                break;
-            }
+        CommonStatus knownStatus = findCommonStatus(code);
+        if (knownStatus != null) {
+            message = knownStatus.getMessage();
         }
         String error = code + ":" + message;
         if (error.length() > 255) {
             return error.substring(0, 255);
         }
         return error;
+    }
+
+    private CommonStatus findCommonStatus(int code) {
+        for (CommonStatus status : CommonStatus.values()) {
+            if (status.getCode() == code) {
+                return status;
+            }
+        }
+        return null;
     }
 
     /**

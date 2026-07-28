@@ -29,12 +29,16 @@ import java.time.ZoneId;
 import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -72,33 +76,22 @@ class OrderFinalizationRetryJobTest {
     @Test
     @DisplayName("Finalization retry scan continues after one unexpected failure")
     void shouldRetryDueOrdersAndContinueAfterOneUnexpectedFailure() {
-        ReflectionTestUtils.setField(orderInfoService, "clock", Clock.fixed(FIXED_TRACE_END, TEST_ZONE));
         LocalDateTime now = LocalDateTime.now(Clock.fixed(FIXED_TRACE_END, TEST_ZONE));
         OrderInfo firstDueOrder = pendingOrder(100L, 301L);
         OrderInfo secondDueOrder = pendingOrder(101L, 302L);
         when(orderInfoMapper.selectList(any())).thenReturn(Arrays.asList(firstDueOrder, secondDueOrder));
-        when(orderInfoMapper.selectOne(any())).thenReturn(firstDueOrder).thenReturn(secondDueOrder);
-        when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1).thenReturn(1);
-        when(serviceDriverUserClient.getCarById(301L)).thenThrow(new IllegalStateException("synthetic failure"));
+        OrderInfoService spyService = spy(orderInfoService);
+        doThrow(new IllegalStateException("synthetic unexpected failure"))
+                .doReturn(ResponseResult.success())
+                .when(spyService).retryFinalization(anyLong());
 
-        Car car = new Car();
-        car.setTid("tid-302");
-        when(serviceDriverUserClient.getCarById(302L)).thenReturn(ResponseResult.success(car));
-        TrsearchResponse trsearchResponse = new TrsearchResponse();
-        trsearchResponse.setDriveMile(5000L);
-        trsearchResponse.setDriveTime(600L);
-        when(serviceMapClient.trsearch(eq("tid-302"), anyLong(), anyLong()))
-                .thenReturn(ResponseResult.success(trsearchResponse));
-        when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
-                .thenReturn(ResponseResult.success(19.00));
-
-        int processed = orderInfoService.retryDueFinalizations(now, 50);
+        int processed = spyService.retryDueFinalizations(now, 50);
 
         assertEquals(1, processed);
-        verify(orderInfoMapper, times(2)).selectOne(any());
-        verify(serviceDriverUserClient, times(2)).getCarById(anyLong());
-        verify(servicePriceClient, times(1)).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
-        verify(orderInfoMapper, times(1)).updateById(secondDueOrder);
+        verify(spyService, times(1)).retryFinalization(100L);
+        verify(spyService, times(1)).retryFinalization(101L);
+        verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
     }
 
     private OrderInfo pendingOrder(Long orderId, Long carId) {

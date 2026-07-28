@@ -115,11 +115,32 @@ WHERE order_status = 10
   );
 
 -- POST-MIGRATION ASSERTION
--- Expected result: zero rows; failed finalization rows should not have a future next retry.
-SELECT COUNT(*) AS failed_rows_with_future_retry
+-- Expected result: zero rows; failed finalization rows should not retain any next retry.
+SELECT COUNT(*) AS failed_rows_with_next_retry
 FROM order_info
 WHERE order_status = 11
-  AND finalization_next_retry_at > NOW();
+  AND finalization_next_retry_at IS NOT NULL;
+
+-- POST-MIGRATION ASSERTION
+-- Expected result: zero rows; attempts are bounded by the service-order retry limit.
+SELECT COUNT(*) AS rows_exceeding_finalization_attempt_limit
+FROM order_info
+WHERE finalization_attempts > 3;
+
+-- POST-MIGRATION ASSERTION
+-- Expected result after the scheduler runs: zero rows; expired max-attempt leases should become status 11.
+SELECT COUNT(*) AS expired_max_attempt_pending_rows
+FROM order_info
+WHERE order_status = 10
+  AND finalization_attempts >= 3
+  AND finalization_next_retry_at <= NOW();
+
+-- POST-MIGRATION ASSERTION
+-- Expected result: zero rows; terminal completed rows should not retain retry scheduling.
+SELECT COUNT(*) AS completed_rows_with_next_retry
+FROM order_info
+WHERE order_status IN (6, 7, 8)
+  AND finalization_next_retry_at IS NOT NULL;
 
 -- POST-ROLLBACK ASSERTION
 -- Expected result after rollback: zero rows; ORDER-04 columns should be gone.

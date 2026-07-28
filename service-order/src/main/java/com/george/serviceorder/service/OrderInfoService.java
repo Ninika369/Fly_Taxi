@@ -1,6 +1,7 @@
 package com.george.serviceorder.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 
 import com.george.internalCommon.constant.CommonStatus;
 import com.george.internalCommon.constant.OrderConstant;
@@ -32,6 +33,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.RequestBody;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -48,7 +50,12 @@ import java.util.concurrent.TimeUnit;
 public class OrderInfoService {
 
     private static final int MAX_DISPATCH_ATTEMPTS = 6;
+    private static final int MAX_FINALIZATION_ATTEMPTS = 3;
+    private static final long FINALIZATION_BASE_RETRY_DELAY_SECONDS = 30L;
+    private static final long FINALIZATION_PROCESSING_LEASE_SECONDS = 120L;
+    private static final int FINALIZATION_RETRY_BATCH_SIZE = 50;
     private long dispatchRetryDelayMs = TimeUnit.SECONDS.toMillis(20);
+    private Clock clock = Clock.systemDefaultZone();
 
     // the mapper to interact with orderInfo database
     @Autowired
@@ -423,6 +430,8 @@ public class OrderInfoService {
                 .or().eq("order_status",OrderConstant.PICK_UP_PASSENGER)
                 .or().eq("order_status",OrderConstant.PASSENGER_GETOFF)
                 .or().eq("order_status",OrderConstant.TO_START_PAY)
+                .or().eq("order_status",OrderConstant.FINALIZATION_PENDING)
+                .or().eq("order_status",OrderConstant.FINALIZATION_FAILED)
         );
 
 
@@ -535,58 +544,342 @@ public class OrderInfoService {
     public ResponseResult passengerGetoff(@RequestBody OrderRequest orderRequest){
         Long orderId = orderRequest.getOrderId();
 
-        // search using order id
+        OrderInfo orderInfo = selectOrderById(orderId);
+        if (orderInfo == null) {
+            return ResponseResult.fail(CommonStatus.ORDER_NOT_FOUND.getCode(),
+                    CommonStatus.ORDER_NOT_FOUND.getMessage());
+        }
+
+        LocalDateTime now = LocalDateTime.now(clock);
+        Integer orderStatus = orderInfo.getOrderStatus();
+        if (isFinalizationIdempotentSuccess(orderStatus)) {
+            return ResponseResult.success();
+        }
+        if (isOrderStatus(orderStatus, OrderConstant.FINALIZATION_FAILED)) {
+            return ResponseResult.fail(CommonStatus.FINALIZATION_FAILED.getCode(),
+                    CommonStatus.FINALIZATION_FAILED.getMessage());
+        }
+        if (!isFinalizationEligible(orderStatus)) {
+            return ResponseResult.fail(CommonStatus.ORDER_FINALIZATION_NOT_ALLOWED.getCode(),
+                    CommonStatus.ORDER_FINALIZATION_NOT_ALLOWED.getMessage());
+        }
+        if (isOrderStatus(orderStatus, OrderConstant.FINALIZATION_PENDING) && !isFinalizationDue(orderInfo, now)) {
+            return ResponseResult.fail(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getCode(),
+                    CommonStatus.FINALIZATION_RETRY_SCHEDULED.getMessage());
+        }
+
+        return claimAndFinalize(orderInfo, orderRequest, now);
+    }
+
+    public ResponseResult retryFinalization(Long orderId) {
+        OrderInfo orderInfo = selectOrderById(orderId);
+        if (orderInfo == null) {
+            return ResponseResult.fail(CommonStatus.ORDER_NOT_FOUND.getCode(),
+                    CommonStatus.ORDER_NOT_FOUND.getMessage());
+        }
+
+        LocalDateTime now = LocalDateTime.now(clock);
+        Integer orderStatus = orderInfo.getOrderStatus();
+        if (isFinalizationIdempotentSuccess(orderStatus)) {
+            return ResponseResult.success();
+        }
+        if (isOrderStatus(orderStatus, OrderConstant.FINALIZATION_FAILED)) {
+            return ResponseResult.fail(CommonStatus.FINALIZATION_FAILED.getCode(),
+                    CommonStatus.FINALIZATION_FAILED.getMessage());
+        }
+        if (!isOrderStatus(orderStatus, OrderConstant.FINALIZATION_PENDING)) {
+            return ResponseResult.fail(CommonStatus.ORDER_FINALIZATION_NOT_ALLOWED.getCode(),
+                    CommonStatus.ORDER_FINALIZATION_NOT_ALLOWED.getMessage());
+        }
+        if (!isFinalizationDue(orderInfo, now)) {
+            return ResponseResult.fail(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getCode(),
+                    CommonStatus.FINALIZATION_RETRY_SCHEDULED.getMessage());
+        }
+
+        return claimAndFinalize(orderInfo, null, now);
+    }
+
+    public int retryDueFinalizations(LocalDateTime now) {
+        return retryDueFinalizations(now, FINALIZATION_RETRY_BATCH_SIZE);
+    }
+
+    public int retryDueFinalizations(LocalDateTime now, int batchSize) {
         QueryWrapper<OrderInfo> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("id",orderId);
-        OrderInfo orderInfo = orderInfoMapper.selectOne(queryWrapper);
+        queryWrapper.eq("order_status", OrderConstant.FINALIZATION_PENDING)
+                .le("finalization_next_retry_at", now)
+                .orderByAsc("finalization_next_retry_at")
+                .last("LIMIT " + Math.max(1, batchSize));
 
-        orderInfo.setPassengerGetoffTime(LocalDateTime.now());
-        orderInfo.setPassengerGetoffLongitude(orderRequest.getPassengerGetoffLongitude());
-        orderInfo.setPassengerGetoffLatitude(orderRequest.getPassengerGetoffLatitude());
+        List<OrderInfo> dueOrders = orderInfoMapper.selectList(queryWrapper);
+        if (dueOrders == null) {
+            return 0;
+        }
 
-        orderInfo.setOrderStatus(OrderConstant.PASSENGER_GETOFF);
+        int processed = 0;
+        for (OrderInfo dueOrder : dueOrders) {
+            Long dueOrderId = dueOrder.getId();
+            try {
+                retryFinalization(dueOrderId);
+                processed++;
+            } catch (RuntimeException e) {
+                log.warn("Order finalization retry failed unexpectedly; orderId={}, exceptionType={}",
+                        dueOrderId, e.getClass().getSimpleName());
+            }
+        }
+        return processed;
+    }
 
-        // get driving period and miles using service-map
-        ResponseResult<Car> carById = serviceDriverUserClient.getCarById(orderInfo.getCarId());
+    private ResponseResult claimAndFinalize(OrderInfo orderInfo, OrderRequest orderRequest, LocalDateTime now) {
+        Integer currentStatus = orderInfo.getOrderStatus();
+        int currentAttempts = currentFinalizationAttempts(orderInfo);
+        if (currentAttempts >= MAX_FINALIZATION_ATTEMPTS) {
+            return ResponseResult.fail(CommonStatus.FINALIZATION_FAILED.getCode(),
+                    CommonStatus.FINALIZATION_FAILED.getMessage());
+        }
+
+        int attempt = currentAttempts + 1;
+        LocalDateTime processingLeaseUntil = now.plusSeconds(FINALIZATION_PROCESSING_LEASE_SECONDS);
+        Long traceEndEpochMs = orderInfo.getFinalizationTraceEndEpochMs();
+        LocalDateTime passengerGetoffTime = orderInfo.getPassengerGetoffTime();
+        String passengerGetoffLongitude = orderInfo.getPassengerGetoffLongitude();
+        String passengerGetoffLatitude = orderInfo.getPassengerGetoffLatitude();
+
+        UpdateWrapper<OrderInfo> updateWrapper = new UpdateWrapper<>();
+        updateWrapper.eq("id", orderInfo.getId())
+                .eq("order_status", currentStatus)
+                .eq("finalization_attempts", currentAttempts);
+        if (isOrderStatus(currentStatus, OrderConstant.FINALIZATION_PENDING)) {
+            updateWrapper.and(wrapper -> wrapper.isNull("finalization_next_retry_at")
+                    .or().le("finalization_next_retry_at", now));
+        }
+        updateWrapper.set("order_status", OrderConstant.FINALIZATION_PENDING)
+                .set("finalization_attempts", attempt)
+                .set("finalization_next_retry_at", processingLeaseUntil)
+                .set("finalization_last_error", null)
+                .set("gmt_modified", now);
+
+        if (isOrderStatus(currentStatus, OrderConstant.PICK_UP_PASSENGER)) {
+            Instant traceEnd = Instant.now(clock);
+            traceEndEpochMs = traceEnd.toEpochMilli();
+            passengerGetoffTime = LocalDateTime.ofInstant(traceEnd, ZoneId.systemDefault());
+            passengerGetoffLongitude = orderRequest.getPassengerGetoffLongitude();
+            passengerGetoffLatitude = orderRequest.getPassengerGetoffLatitude();
+            updateWrapper.set("passenger_getoff_time", passengerGetoffTime)
+                    .set("passenger_getoff_longitude", passengerGetoffLongitude)
+                    .set("passenger_getoff_latitude", passengerGetoffLatitude)
+                    .set("finalization_trace_end_epoch_ms", traceEndEpochMs);
+        }
+
+        int claimed = orderInfoMapper.update(null, updateWrapper);
+        if (claimed == 0) {
+            return ResponseResult.fail(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getCode(),
+                    CommonStatus.FINALIZATION_RETRY_SCHEDULED.getMessage());
+        }
+
+        orderInfo.setOrderStatus(OrderConstant.FINALIZATION_PENDING);
+        orderInfo.setFinalizationAttempts(attempt);
+        orderInfo.setFinalizationNextRetryAt(processingLeaseUntil);
+        orderInfo.setFinalizationLastError(null);
+        orderInfo.setGmtModified(now);
+        orderInfo.setPassengerGetoffTime(passengerGetoffTime);
+        orderInfo.setPassengerGetoffLongitude(passengerGetoffLongitude);
+        orderInfo.setPassengerGetoffLatitude(passengerGetoffLatitude);
+        orderInfo.setFinalizationTraceEndEpochMs(traceEndEpochMs);
+
+        return finalizeClaimedOrder(orderInfo, attempt, now);
+    }
+
+    private ResponseResult finalizeClaimedOrder(OrderInfo orderInfo, int attempt, LocalDateTime now) {
+        ResponseResult<Car> carById = null;
+        if (orderInfo.getCarId() != null) {
+            carById = serviceDriverUserClient.getCarById(orderInfo.getCarId());
+        }
+        ResponseResult carFailure = validateCarLookup(carById);
+        if (carFailure != null) {
+            return handleFinalizationFailure(orderInfo, attempt, carFailure, now);
+        }
+
+        Car car = carById.getData();
+        ResponseResult tracePrerequisiteFailure = validateTracePrerequisites(orderInfo, car);
+        if (tracePrerequisiteFailure != null) {
+            return handleFinalizationFailure(orderInfo, attempt, tracePrerequisiteFailure, now);
+        }
+
         Long starttime = orderInfo.getPickUpPassengerTime()
                 .atZone(ZoneId.systemDefault())
                 .toInstant()
                 .toEpochMilli();
-        Long endtime = Instant.now().toEpochMilli();
+        Long endtime = orderInfo.getFinalizationTraceEndEpochMs();
 
+        ResponseResult<TrsearchResponse> trsearch = serviceMapClient.trsearch(car.getTid(), starttime,endtime);
+        ResponseResult trackFailure = validateTrackLookup(trsearch);
+        if (trackFailure != null) {
+            return handleFinalizationFailure(orderInfo, attempt, trackFailure, now);
+        }
+        TrsearchResponse data = trsearch.getData();
+        Long driveMile = data.getDriveMile();
+        Long driveDurationSeconds = data.getDriveTime();
 
-        ResponseResult<TrsearchResponse> trsearch = serviceMapClient.trsearch(carById.getData().getTid(), starttime,endtime);
+        // get the actual price
+        String address = orderInfo.getAddress();
+        String vehicleType = orderInfo.getVehicleType();
+        ResponseResult<Double> doubleResponseResult = servicePriceClient.calculatePrice(driveMile.intValue(), driveDurationSeconds.intValue(), address, vehicleType);
+        ResponseResult priceFailure = validatePriceLookup(doubleResponseResult);
+        if (priceFailure != null) {
+            return handleFinalizationFailure(orderInfo, attempt, priceFailure, now);
+        }
+        Double price = doubleResponseResult.getData();
+
+        orderInfo.setDriveMile(driveMile);
+        orderInfo.setDriveTime(driveDurationSeconds);
+        orderInfo.setPrice(price);
+        orderInfo.setOrderStatus(OrderConstant.PASSENGER_GETOFF);
+        orderInfo.setFinalizationNextRetryAt(null);
+        orderInfo.setFinalizationLastError(null);
+        orderInfo.setGmtModified(now);
+
+        orderInfoMapper.updateById(orderInfo);
+        return ResponseResult.success();
+    }
+
+    private ResponseResult handleFinalizationFailure(OrderInfo orderInfo, int attempt, ResponseResult failure, LocalDateTime now) {
+        orderInfo.setFinalizationLastError(safeFinalizationError(failure));
+        orderInfo.setGmtModified(now);
+
+        if (attempt >= MAX_FINALIZATION_ATTEMPTS) {
+            orderInfo.setOrderStatus(OrderConstant.FINALIZATION_FAILED);
+            orderInfo.setFinalizationNextRetryAt(null);
+            orderInfoMapper.updateById(orderInfo);
+            log.warn("Order finalization reached retry limit; orderId={}, attempt={}, responseCode={}",
+                    orderInfo.getId(), attempt, failure.getCode());
+            return ResponseResult.fail(CommonStatus.FINALIZATION_FAILED.getCode(),
+                    CommonStatus.FINALIZATION_FAILED.getMessage());
+        }
+
+        LocalDateTime nextRetryAt = now.plusSeconds(finalizationBackoffSeconds(attempt));
+        orderInfo.setOrderStatus(OrderConstant.FINALIZATION_PENDING);
+        orderInfo.setFinalizationNextRetryAt(nextRetryAt);
+        orderInfoMapper.updateById(orderInfo);
+        log.warn("Order finalization scheduled for retry; orderId={}, attempt={}, responseCode={}, nextRetryAt={}",
+                orderInfo.getId(), attempt, failure.getCode(), nextRetryAt);
+        return ResponseResult.fail(failure.getCode(), failure.getMessage());
+    }
+
+    private OrderInfo selectOrderById(Long orderId) {
+        QueryWrapper<OrderInfo> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("id",orderId);
+        return orderInfoMapper.selectOne(queryWrapper);
+    }
+
+    private boolean isFinalizationIdempotentSuccess(Integer orderStatus) {
+        return isOrderStatus(orderStatus, OrderConstant.PASSENGER_GETOFF)
+                || isOrderStatus(orderStatus, OrderConstant.TO_START_PAY)
+                || isOrderStatus(orderStatus, OrderConstant.SUCCESS_PAY);
+    }
+
+    private boolean isFinalizationEligible(Integer orderStatus) {
+        return isOrderStatus(orderStatus, OrderConstant.PICK_UP_PASSENGER)
+                || isOrderStatus(orderStatus, OrderConstant.FINALIZATION_PENDING);
+    }
+
+    private boolean isOrderStatus(Integer actualStatus, int expectedStatus) {
+        return actualStatus != null && actualStatus == expectedStatus;
+    }
+
+    private boolean isFinalizationDue(OrderInfo orderInfo, LocalDateTime now) {
+        LocalDateTime nextRetryAt = orderInfo.getFinalizationNextRetryAt();
+        return nextRetryAt == null || !nextRetryAt.isAfter(now);
+    }
+
+    private int currentFinalizationAttempts(OrderInfo orderInfo) {
+        Integer finalizationAttempts = orderInfo.getFinalizationAttempts();
+        if (finalizationAttempts == null) {
+            return 0;
+        }
+        return finalizationAttempts;
+    }
+
+    private long finalizationBackoffSeconds(int attempt) {
+        if (attempt <= 1) {
+            return FINALIZATION_BASE_RETRY_DELAY_SECONDS;
+        }
+        return FINALIZATION_BASE_RETRY_DELAY_SECONDS * (1L << (attempt - 1));
+    }
+
+    private ResponseResult validateCarLookup(ResponseResult<Car> carById) {
+        if (carById == null) {
+            return downstreamResponseError();
+        }
+        if (carById.getCode() != CommonStatus.SUCCESS.getCode()) {
+            return ResponseResult.fail(carById.getCode(), carById.getMessage());
+        }
+        Car car = carById.getData();
+        if (car == null || car.getTid() == null || car.getTid().trim().isEmpty()) {
+            return downstreamResponseError();
+        }
+        return null;
+    }
+
+    private ResponseResult validateTracePrerequisites(OrderInfo orderInfo, Car car) {
+        if (car == null || car.getTid() == null || car.getTid().trim().isEmpty()) {
+            return downstreamResponseError();
+        }
+        if (orderInfo.getPickUpPassengerTime() == null || orderInfo.getFinalizationTraceEndEpochMs() == null) {
+            return downstreamResponseError();
+        }
+        return null;
+    }
+
+    private ResponseResult validateTrackLookup(ResponseResult<TrsearchResponse> trsearch) {
         if (trsearch == null) {
-            return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
-                    CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
+            return downstreamResponseError();
         }
         if (trsearch.getCode() != CommonStatus.SUCCESS.getCode()) {
             return ResponseResult.fail(trsearch.getCode(), trsearch.getMessage());
         }
         TrsearchResponse data = trsearch.getData();
         if (data == null) {
-            return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
-                    CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
+            return downstreamResponseError();
         }
-        Long driveMile = data.getDriveMile();
-        Long driveDurationSeconds = data.getDriveTime();
-        if (driveMile == null || driveDurationSeconds == null) {
-            return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
-                    CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
+        if (data.getDriveMile() == null || data.getDriveTime() == null) {
+            return downstreamResponseError();
         }
+        return null;
+    }
 
-        orderInfo.setDriveMile(driveMile);
-        orderInfo.setDriveTime(driveDurationSeconds);
+    private ResponseResult validatePriceLookup(ResponseResult<Double> priceResponse) {
+        if (priceResponse == null) {
+            return downstreamResponseError();
+        }
+        if (priceResponse.getCode() != CommonStatus.SUCCESS.getCode()) {
+            return ResponseResult.fail(priceResponse.getCode(), priceResponse.getMessage());
+        }
+        Double price = priceResponse.getData();
+        if (price == null || price.isNaN() || price.isInfinite()) {
+            return downstreamResponseError();
+        }
+        return null;
+    }
 
-        // get the actual price
-        String address = orderInfo.getAddress();
-        String vehicleType = orderInfo.getVehicleType();
-        ResponseResult<Double> doubleResponseResult = servicePriceClient.calculatePrice(driveMile.intValue(), driveDurationSeconds.intValue(), address, vehicleType);
-        Double price = doubleResponseResult.getData();
-        orderInfo.setPrice(price);
+    private ResponseResult downstreamResponseError() {
+        return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
+                CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
+    }
 
-        orderInfoMapper.updateById(orderInfo);
-        return ResponseResult.success();
+    private String safeFinalizationError(ResponseResult failure) {
+        int code = failure.getCode();
+        String message = CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage();
+        for (CommonStatus status : CommonStatus.values()) {
+            if (status.getCode() == code) {
+                message = status.getMessage();
+                break;
+            }
+        }
+        String error = code + ":" + message;
+        if (error.length() > 255) {
+            return error.substring(0, 255);
+        }
+        return error;
     }
 
     /**
@@ -735,6 +1028,8 @@ public class OrderInfoService {
                     .or().eq("order_status",OrderConstant.PICK_UP_PASSENGER)
                     .or().eq("order_status",OrderConstant.PASSENGER_GETOFF)
                     .or().eq("order_status",OrderConstant.TO_START_PAY)
+                    .or().eq("order_status",OrderConstant.FINALIZATION_PENDING)
+                    .or().eq("order_status",OrderConstant.FINALIZATION_FAILED)
             );
         }
 

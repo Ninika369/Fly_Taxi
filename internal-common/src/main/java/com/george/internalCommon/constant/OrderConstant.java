@@ -22,6 +22,10 @@ public class OrderConstant {
     public static final int SUCCESS_PAY = 8;
     // 9. Order canceled
     public static final int ORDER_CANCEL = 9;
+    // 10: Order finalization accepted and pending retry
+    public static final int FINALIZATION_PENDING = 10;
+    // 11: Order finalization reached the retry limit
+    public static final int FINALIZATION_FAILED = 11;
 
     /**
      * Cancel codes:

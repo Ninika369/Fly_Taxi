@@ -1,5 +1,6 @@
 package com.george.serviceorder.service;
 
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.george.internalCommon.constant.CommonStatus;
 import com.george.internalCommon.constant.OrderConstant;
 import com.george.internalCommon.constant.UserIdentity;
@@ -35,6 +36,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;   // when(), verify(), any(), etc.
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -97,6 +99,8 @@ class OrderInfoServiceTest {
     private static final Long ORDER_ID = 100L;
     private static final String PASSENGER = UserIdentity.PASSENGER.getIdentity(); // "1"
     private static final String DRIVER = UserIdentity.DRIVER.getIdentity();       // "2"
+    private static final Instant FIXED_TRACE_END = Instant.parse("2026-07-28T01:02:03Z");
+    private static final ZoneId TEST_ZONE = ZoneId.of("Pacific/Auckland");
 
     private OrderInfo orderInfo;
 
@@ -167,6 +171,63 @@ class OrderInfoServiceTest {
         return orderRequest;
     }
 
+    private OrderRequest getoffRequest() {
+        OrderRequest orderRequest = new OrderRequest();
+        orderRequest.setOrderId(ORDER_ID);
+        orderRequest.setPassengerGetoffLongitude("174.7762");
+        orderRequest.setPassengerGetoffLatitude("-36.8519");
+        return orderRequest;
+    }
+
+    private void givenFinalizableOrder(Long carId) {
+        orderInfo.setOrderStatus(OrderConstant.PICK_UP_PASSENGER);
+        orderInfo.setCarId(carId);
+        orderInfo.setPickUpPassengerTime(LocalDateTime.of(2026, 7, 28, 12, 0));
+        orderInfo.setAddress("110000");
+        orderInfo.setVehicleType("1");
+        when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo);
+    }
+
+    private void givenPendingFinalizationOrder(Long carId, int attempts, LocalDateTime nextRetryAt) {
+        givenFinalizableOrder(carId);
+        orderInfo.setOrderStatus(OrderConstant.FINALIZATION_PENDING);
+        orderInfo.setFinalizationAttempts(attempts);
+        orderInfo.setFinalizationNextRetryAt(nextRetryAt);
+        orderInfo.setFinalizationTraceEndEpochMs(FIXED_TRACE_END.toEpochMilli());
+    }
+
+    private void givenFinalizationClock() {
+        ReflectionTestUtils.setField(orderInfoService, "clock", Clock.fixed(FIXED_TRACE_END, TEST_ZONE));
+    }
+
+    private void givenFinalizationClaimSucceeds() {
+        when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
+    }
+
+    private void givenFinalizationClaimIsLost() {
+        when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(0);
+    }
+
+    private void givenCarLookupSucceeds(Long carId, String tid) {
+        Car car = new Car();
+        car.setTid(tid);
+        when(serviceDriverUserClient.getCarById(carId)).thenReturn(ResponseResult.success(car));
+    }
+
+    private void givenTrackLookupSucceeds(String tid, long driveMile, long driveDurationSeconds) {
+        TrsearchResponse trsearchResponse = new TrsearchResponse();
+        trsearchResponse.setDriveMile(driveMile);
+        trsearchResponse.setDriveTime(driveDurationSeconds);
+        when(serviceMapClient.trsearch(eq(tid), anyLong(), anyLong()))
+                .thenReturn(ResponseResult.success(trsearchResponse));
+    }
+
+    private OrderInfo captureFinalizationFailureUpdate() {
+        ArgumentCaptor<OrderInfo> captor = ArgumentCaptor.forClass(OrderInfo.class);
+        verify(orderInfoMapper, times(1)).updateById(captor.capture());
+        return captor.getValue();
+    }
+
     // ======================== Order creation preflight failures ========================
 
     @Test
@@ -223,35 +284,28 @@ class OrderInfoServiceTest {
     @DisplayName("Passenger get-off forwards ride duration in seconds to pricing")
     void shouldForwardDriveDurationInSeconds_whenPassengerGetsOff() {
         Long carId = 300L;
-        OrderRequest orderRequest = new OrderRequest();
-        orderRequest.setOrderId(ORDER_ID);
-        orderRequest.setPassengerGetoffLongitude("174.7762");
-        orderRequest.setPassengerGetoffLatitude("-36.8519");
-
-        orderInfo.setCarId(carId);
-        orderInfo.setPickUpPassengerTime(LocalDateTime.now().minusMinutes(10));
-        orderInfo.setAddress("110000");
-        orderInfo.setVehicleType("1");
-        when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo);
-
-        Car car = new Car();
-        car.setTid("tid-300");
-        when(serviceDriverUserClient.getCarById(carId)).thenReturn(ResponseResult.success(car));
-
-        TrsearchResponse trsearchResponse = new TrsearchResponse();
-        trsearchResponse.setDriveMile(5000L);
-        trsearchResponse.setDriveTime(600L);
-        when(serviceMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
-                .thenReturn(ResponseResult.success(trsearchResponse));
+        OrderRequest orderRequest = getoffRequest();
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
+        givenTrackLookupSucceeds("tid-300", 5000L, 600L);
         when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
                 .thenReturn(ResponseResult.success(19.00));
 
-        orderInfoService.passengerGetoff(orderRequest);
+        ResponseResult result = orderInfoService.passengerGetoff(orderRequest);
 
+        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
         verify(servicePriceClient, times(1)).calculatePrice(5000, 600, "110000", "1");
-        assertEquals(600L, orderInfo.getDriveTime());
-        assertEquals(19.00, orderInfo.getPrice());
-        verify(orderInfoMapper, times(1)).updateById(orderInfo);
+        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
+        ArgumentCaptor<OrderInfo> successCaptor = ArgumentCaptor.forClass(OrderInfo.class);
+        verify(orderInfoMapper, times(1)).updateById(successCaptor.capture());
+        OrderInfo successUpdate = successCaptor.getValue();
+        assertEquals(OrderConstant.PASSENGER_GETOFF, successUpdate.getOrderStatus());
+        assertEquals(1, successUpdate.getFinalizationAttempts());
+        assertEquals(FIXED_TRACE_END.toEpochMilli(), successUpdate.getFinalizationTraceEndEpochMs());
+        assertEquals(600L, successUpdate.getDriveTime());
+        assertEquals(19.00, successUpdate.getPrice());
     }
 
     @Test
@@ -267,32 +321,17 @@ class OrderInfoServiceTest {
                     .atZone(testZone)
                     .toInstant()
                     .toEpochMilli();
-            OrderRequest orderRequest = new OrderRequest();
-            orderRequest.setOrderId(ORDER_ID);
-            orderRequest.setPassengerGetoffLongitude("174.7762");
-            orderRequest.setPassengerGetoffLatitude("-36.8519");
-
-            orderInfo.setCarId(carId);
+            OrderRequest orderRequest = getoffRequest();
+            givenFinalizationClock();
+            givenFinalizableOrder(carId);
             orderInfo.setPickUpPassengerTime(pickUpLocalTime);
-            orderInfo.setAddress("110000");
-            orderInfo.setVehicleType("1");
-            when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo);
-
-            Car car = new Car();
-            car.setTid("tid-300");
-            when(serviceDriverUserClient.getCarById(carId)).thenReturn(ResponseResult.success(car));
-
-            TrsearchResponse trsearchResponse = new TrsearchResponse();
-            trsearchResponse.setDriveMile(5000L);
-            trsearchResponse.setDriveTime(600L);
-            when(serviceMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
-                    .thenReturn(ResponseResult.success(trsearchResponse));
+            givenFinalizationClaimSucceeds();
+            givenCarLookupSucceeds(carId, "tid-300");
+            givenTrackLookupSucceeds("tid-300", 5000L, 600L);
             when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
                     .thenReturn(ResponseResult.success(19.00));
 
-            long beforeCall = Instant.now().toEpochMilli();
             orderInfoService.passengerGetoff(orderRequest);
-            long afterCall = Instant.now().toEpochMilli();
 
             ArgumentCaptor<Long> starttimeCaptor = ArgumentCaptor.forClass(Long.class);
             ArgumentCaptor<Long> endtimeCaptor = ArgumentCaptor.forClass(Long.class);
@@ -302,14 +341,9 @@ class OrderInfoServiceTest {
 
             assertAll(
                     () -> assertEquals(expectedStartTime, actualStartTime,
-                            "starttime should use the JVM default zone for the stored pickup wall time; beforeCall="
-                                    + beforeCall + ", actualEndTime=" + actualEndTime + ", afterCall=" + afterCall),
-                    () -> assertTrue(actualEndTime >= beforeCall,
-                            "endtime should be at or after beforeCall; beforeCall=" + beforeCall
-                                    + ", actualEndTime=" + actualEndTime),
-                    () -> assertTrue(actualEndTime <= afterCall,
-                            "endtime should be at or before afterCall; actualEndTime=" + actualEndTime
-                                    + ", afterCall=" + afterCall),
+                            "starttime should use the JVM default zone for the stored pickup wall time"),
+                    () -> assertEquals(FIXED_TRACE_END.toEpochMilli(), actualEndTime,
+                            "endtime should be fixed at the first accepted get-off instant"),
                     () -> assertTrue(actualEndTime > actualStartTime,
                             "endtime should be after starttime; starttime=" + actualStartTime
                                     + ", endtime=" + actualEndTime)
@@ -323,18 +357,11 @@ class OrderInfoServiceTest {
     @DisplayName("Passenger get-off preserves empty-track failure without pricing")
     void shouldPreserveTrackEmptyFailure_whenPassengerGetsOff() {
         Long carId = 300L;
-        OrderRequest orderRequest = new OrderRequest();
-        orderRequest.setOrderId(ORDER_ID);
-        orderRequest.setPassengerGetoffLongitude("174.7762");
-        orderRequest.setPassengerGetoffLatitude("-36.8519");
-
-        orderInfo.setCarId(carId);
-        orderInfo.setPickUpPassengerTime(LocalDateTime.now().minusMinutes(10));
-        when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo);
-
-        Car car = new Car();
-        car.setTid("tid-300");
-        when(serviceDriverUserClient.getCarById(carId)).thenReturn(ResponseResult.success(car));
+        OrderRequest orderRequest = getoffRequest();
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
         when(serviceMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
                 .thenReturn(ResponseResult.fail(1402, "No track data is available for the requested interval"));
 
@@ -343,25 +370,25 @@ class OrderInfoServiceTest {
         assertEquals(1402, result.getCode());
         assertEquals("No track data is available for the requested interval", result.getMessage());
         verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
-        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
+        OrderInfo pendingUpdate = captureFinalizationFailureUpdate();
+        assertEquals(OrderConstant.FINALIZATION_PENDING, pendingUpdate.getOrderStatus());
+        assertEquals(1, pendingUpdate.getFinalizationAttempts());
+        assertNotNull(pendingUpdate.getFinalizationNextRetryAt());
+        assertEquals("1402:No track data is available for the requested interval",
+                pendingUpdate.getFinalizationLastError());
+        assertNull(pendingUpdate.getPrice());
     }
 
     @Test
     @DisplayName("Passenger get-off rejects successful track search without data")
     void shouldReturnDownstreamResponseError_whenTrackSearchSucceedsWithoutData() {
         Long carId = 300L;
-        OrderRequest orderRequest = new OrderRequest();
-        orderRequest.setOrderId(ORDER_ID);
-        orderRequest.setPassengerGetoffLongitude("174.7762");
-        orderRequest.setPassengerGetoffLatitude("-36.8519");
-
-        orderInfo.setCarId(carId);
-        orderInfo.setPickUpPassengerTime(LocalDateTime.now().minusMinutes(10));
-        when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo);
-
-        Car car = new Car();
-        car.setTid("tid-300");
-        when(serviceDriverUserClient.getCarById(carId)).thenReturn(ResponseResult.success(car));
+        OrderRequest orderRequest = getoffRequest();
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
         when(serviceMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
                 .thenReturn(ResponseResult.success(null));
 
@@ -370,7 +397,201 @@ class OrderInfoServiceTest {
         assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
         assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
         verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
+        OrderInfo pendingUpdate = captureFinalizationFailureUpdate();
+        assertEquals(OrderConstant.FINALIZATION_PENDING, pendingUpdate.getOrderStatus());
+        assertEquals(1, pendingUpdate.getFinalizationAttempts());
+        assertNotNull(pendingUpdate.getFinalizationNextRetryAt());
+        assertEquals("1700:Downstream service returned an invalid response",
+                pendingUpdate.getFinalizationLastError());
+        assertNull(pendingUpdate.getPrice());
+    }
+
+    @Test
+    @DisplayName("Passenger get-off returns order-not-found without side effects")
+    void shouldReturnOrderNotFound_whenFinalizingMissingOrder() {
+        when(orderInfoMapper.selectOne(any())).thenReturn(null);
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.ORDER_NOT_FOUND.getCode(), result.getCode());
+        assertEquals(CommonStatus.ORDER_NOT_FOUND.getMessage(), result.getMessage());
+        verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+    }
+
+    @Test
+    @DisplayName("Passenger get-off is idempotent after finalization")
+    void shouldReturnIdempotentSuccess_whenOrderIsAlreadyFinalized() {
+        int[] finalizedStatuses = {
+                OrderConstant.PASSENGER_GETOFF,
+                OrderConstant.TO_START_PAY,
+                OrderConstant.SUCCESS_PAY
+        };
+
+        for (int finalizedStatus : finalizedStatuses) {
+            reset(orderInfoMapper, serviceDriverUserClient, serviceMapClient, servicePriceClient);
+            OrderInfo finalizedOrder = new OrderInfo();
+            finalizedOrder.setId(ORDER_ID);
+            finalizedOrder.setOrderStatus(finalizedStatus);
+            when(orderInfoMapper.selectOne(any())).thenReturn(finalizedOrder);
+
+            ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+            assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
+            verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
+            verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+            verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+        }
+    }
+
+    @Test
+    @DisplayName("Passenger get-off rejects orders in states that cannot be finalized")
+    void shouldRejectFinalization_whenOrderStateIsNotEligible() {
+        orderInfo.setOrderStatus(OrderConstant.DRIVER_RECEIVE_ORDER);
+        when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo);
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.ORDER_FINALIZATION_NOT_ALLOWED.getCode(), result.getCode());
+        assertEquals(CommonStatus.ORDER_FINALIZATION_NOT_ALLOWED.getMessage(), result.getMessage());
+        verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+    }
+
+    @Test
+    @DisplayName("Passenger get-off persists pending finalization when car lookup fails")
+    void shouldPersistPendingFinalization_whenCarLookupFails() {
+        Long carId = 300L;
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        when(serviceDriverUserClient.getCarById(carId))
+                .thenReturn(ResponseResult.fail(1501, "Driver does not exist"));
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(1501, result.getCode());
+        assertEquals("Driver does not exist", result.getMessage());
+        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
+        OrderInfo pendingUpdate = captureFinalizationFailureUpdate();
+        assertEquals(OrderConstant.FINALIZATION_PENDING, pendingUpdate.getOrderStatus());
+        assertEquals(1, pendingUpdate.getFinalizationAttempts());
+        assertNotNull(pendingUpdate.getFinalizationNextRetryAt());
+        assertEquals("1501:Driver does not exist", pendingUpdate.getFinalizationLastError());
+        verify(serviceMapClient, never()).trsearch(anyString(), anyLong(), anyLong());
+        verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("Passenger get-off persists pending finalization when price calculation fails")
+    void shouldPersistPendingFinalization_whenPriceCalculationFails() {
+        Long carId = 300L;
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
+        givenTrackLookupSucceeds("tid-300", 5000L, 600L);
+        when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
+                .thenReturn(ResponseResult.fail(1700,
+                        "Downstream service returned an invalid response: key=synthetic-secret"));
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
+        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
+        OrderInfo pendingUpdate = captureFinalizationFailureUpdate();
+        assertEquals(OrderConstant.FINALIZATION_PENDING, pendingUpdate.getOrderStatus());
+        assertEquals(1, pendingUpdate.getFinalizationAttempts());
+        assertNotNull(pendingUpdate.getFinalizationNextRetryAt());
+        assertEquals("1700:Downstream service returned an invalid response",
+                pendingUpdate.getFinalizationLastError());
+        assertFalse(pendingUpdate.getFinalizationLastError().contains("synthetic-secret"));
+        assertNull(pendingUpdate.getPrice());
+    }
+
+    @Test
+    @DisplayName("Passenger get-off skips pending finalization that is not due")
+    void shouldReturnRetryScheduled_whenPendingRetryIsNotDue() {
+        givenFinalizationClock();
+        givenPendingFinalizationOrder(300L, 1, LocalDateTime.now(Clock.fixed(FIXED_TRACE_END, TEST_ZONE)).plusMinutes(1));
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getCode(), result.getCode());
+        assertEquals(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getMessage(), result.getMessage());
+        verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+    }
+
+    @Test
+    @DisplayName("Passenger get-off moves finalization to failed at maximum attempts")
+    void shouldMoveToFinalizationFailed_whenMaximumAttemptsAreReached() {
+        Long carId = 300L;
+        givenFinalizationClock();
+        givenPendingFinalizationOrder(carId, 2, LocalDateTime.now(Clock.fixed(FIXED_TRACE_END, TEST_ZONE)).minusSeconds(1));
+        givenFinalizationClaimSucceeds();
+        when(serviceDriverUserClient.getCarById(carId))
+                .thenReturn(ResponseResult.fail(1700, "Downstream service returned an invalid response"));
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.FINALIZATION_FAILED.getCode(), result.getCode());
+        assertEquals(CommonStatus.FINALIZATION_FAILED.getMessage(), result.getMessage());
+        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
+        OrderInfo failedUpdate = captureFinalizationFailureUpdate();
+        assertEquals(OrderConstant.FINALIZATION_FAILED, failedUpdate.getOrderStatus());
+        assertEquals(3, failedUpdate.getFinalizationAttempts());
+        assertNull(failedUpdate.getFinalizationNextRetryAt());
+        assertEquals("1700:Downstream service returned an invalid response",
+                failedUpdate.getFinalizationLastError());
+    }
+
+    @Test
+    @DisplayName("Passenger get-off skips remote calls when finalization claim is lost")
+    void shouldSkipRemoteCalls_whenFinalizationClaimIsLost() {
+        Long carId = 300L;
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimIsLost();
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getCode(), result.getCode());
+        assertEquals(CommonStatus.FINALIZATION_RETRY_SCHEDULED.getMessage(), result.getMessage());
+        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient);
+    }
+
+    @Test
+    @DisplayName("Passenger get-off retries pending finalization with original trace end")
+    void shouldRetryPendingFinalizationWithOriginalTraceEnd_whenRetryBecomesDue() {
+        Long carId = 300L;
+        givenFinalizationClock();
+        givenPendingFinalizationOrder(carId, 1, LocalDateTime.now(Clock.fixed(FIXED_TRACE_END, TEST_ZONE)).minusSeconds(1));
+        orderInfo.setPassengerGetoffLongitude("174.7000");
+        orderInfo.setPassengerGetoffLatitude("-36.8000");
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
+        givenTrackLookupSucceeds("tid-300", 5000L, 600L);
+        when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
+                .thenReturn(ResponseResult.success(19.00));
+
+        ResponseResult result = orderInfoService.passengerGetoff(getoffRequest());
+
+        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
+        ArgumentCaptor<Long> endtimeCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(serviceMapClient).trsearch(eq("tid-300"), anyLong(), endtimeCaptor.capture());
+        assertEquals(FIXED_TRACE_END.toEpochMilli(), endtimeCaptor.getValue());
+        ArgumentCaptor<OrderInfo> successCaptor = ArgumentCaptor.forClass(OrderInfo.class);
+        verify(orderInfoMapper).updateById(successCaptor.capture());
+        assertEquals("174.7000", successCaptor.getValue().getPassengerGetoffLongitude());
+        assertEquals("-36.8000", successCaptor.getValue().getPassengerGetoffLatitude());
+        assertEquals(2, successCaptor.getValue().getFinalizationAttempts());
     }
 
     // ======================== Passenger cancellation ========================

@@ -66,6 +66,10 @@ public enum CommonStatus {
     SERVICE_NOT_PROVIDED(1602, "Service is unavailable in current city"),
     ORDER_CANCEL_ERROR(1603, "Order has been canceled unsuccessfully"),
     DISPATCH_FAILED(1604, "No driver could be assigned to the order"),
+    FINALIZATION_FAILED(1605, "Order finalization failed after maximum attempts"),
+    FINALIZATION_RETRY_SCHEDULED(1606, "Order finalization is pending retry"),
+    ORDER_NOT_FOUND(1607, "Order does not exist"),
+    ORDER_FINALIZATION_NOT_ALLOWED(1608, "Order cannot be finalized from its current state"),
 
     // downstream or integration response errors, from 1700-1799
     DOWNSTREAM_RESPONSE_ERROR(1700, "Downstream service returned an invalid response"),

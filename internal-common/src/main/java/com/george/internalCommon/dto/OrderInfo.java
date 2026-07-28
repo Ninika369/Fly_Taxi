@@ -214,11 +214,31 @@ public class OrderInfo implements Serializable {
     private Long driveTime;
 
     /**
-     * Order status: 1: Order started, 2: Driver accepted the order, 3: On the way to pick up passenger, 4: Driver arrived at the passenger's starting point, 5: Passenger got in, driver started the journey, 6: Arrived at destination, journey ended, not paid, 7: Payment initiated, 8: Payment completed, 9: Order cancelled
+     * Order status: 1: Order started, 2: Driver accepted the order, 3: On the way to pick up passenger, 4: Driver arrived at the passenger's starting point, 5: Passenger got in, driver started the journey, 6: Arrived at destination, journey ended, not paid, 7: Payment initiated, 8: Payment completed, 9: Order cancelled, 10: Finalization pending retry, 11: Finalization failed after maximum attempts
      */
     private Integer orderStatus;
 
     private Double price;
+
+    /**
+     * Number of claimed finalization attempts.
+     */
+    private Integer finalizationAttempts;
+
+    /**
+     * Next retry time for pending finalization, or the crash-recovery lease while an attempt is running.
+     */
+    private LocalDateTime finalizationNextRetryAt;
+
+    /**
+     * Stable finalization error code and domain message.
+     */
+    private String finalizationLastError;
+
+    /**
+     * Fixed trace-search end instant captured when passenger get-off is first accepted.
+     */
+    private Long finalizationTraceEndEpochMs;
 
     /**
      * Creation time

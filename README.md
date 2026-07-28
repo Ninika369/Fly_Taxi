@@ -134,19 +134,21 @@ flowchart LR
 
 ## Engineering Practices
 
-### Test Automation — 119 CI-verified tests across 21 test classes
+### Test Automation — 128 CI-verified tests across 23 test classes
 
-The CI pipeline runs root-level `mvn test` across the full 14-module Maven reactor. The repository currently has 119 CI-verified tests: 115 unit-style tests and 4 lightweight HTTP contract tests. None require a full Spring application context or external MySQL, Redis, or Nacos infrastructure. MockMvc verifies the server-side controller contract, while WireMock exercises the OpenFeign client's HTTP method, path, JSON body, content type, and response decoding. These tests currently live in `internal-common`, `api-passenger`, `service-price`, `service-order`, `service-map`, `security-support-core`, and `security-support-session`; modules without test classes still participate in the reactor and will automatically be covered as tests are added later.
+The CI pipeline runs root-level `mvn test` across the full 14-module Maven reactor. The repository currently has 128 CI-verified tests: 121 unit-style tests and 7 lightweight HTTP contract tests. None require a full Spring application context or external MySQL, Redis, or Nacos infrastructure. MockMvc verifies the server-side controller contract, while WireMock exercises OpenFeign client HTTP methods, paths, query and path parameters, JSON bodies, content types, and response decoding. These tests currently live in `internal-common`, `api-passenger`, `service-price`, `service-order`, `service-map`, `security-support-core`, and `security-support-session`; modules without test classes still participate in the reactor and will automatically be covered as tests are added later.
 
 | Test Class | Module | Tests | What It Covers |
 |-----------|--------|-------|----------------|
 | `BigDecimalUtilsTest` | internal-common | 11 | Arithmetic precision — add, subtract, multiply, divide, edge cases (zero, negative, divide-by-zero) |
 | `PredictPriceServiceTest` | service-price | 18 | Pricing formula — normal trips, short trips, traffic jams, cross-hour duration, rounding boundaries (995m/1004m/1005m), duration staircase, input validation for invalid distance/duration/null inputs, regression tests for .005 precision fix |
 | `PriceRuleServiceTest` | service-price | 8 | Rule versioning — create, edit with change detection, duplicate rejection, fareType composition, version auto-increment |
-| `OrderInfoServiceTest` | service-order | 44 | Order cancellation state machine, durable passenger get-off finalization, bounded finalization retry states, completion-time retry backoff, terminal CAS transitions, expired max-attempt lease handling, sanitized dependency exception handling, idempotent completed-order handling, trace-search UTC window, dispatch lock safety, invalid candidate handling, exhausted dispatch semantics, track-search failure propagation, and pre-insert downstream failure propagation — 5 passenger states, 4 driver states, time boundary (1m59s free vs 2m0s penalty), Mockito verify() for DB writes, CAS claims, retry metadata, and lock release |
+| `OrderInfoServiceTest` | service-order | 50 | Order cancellation state machine, durable passenger get-off finalization, bounded finalization retry states, completion-time retry backoff, terminal CAS transitions, expired max-attempt lease handling, sanitized dependency exception handling, idempotent completed-order handling, trace-search UTC window, dispatch lock safety, invalid candidate handling, exhausted dispatch semantics, track-search failure propagation, and pre-insert downstream failure propagation — 5 passenger states, 4 driver states, fixed-Clock passenger and driver cancellation matrix at 59/60/119/120 seconds, Mockito verify() for DB writes, CAS claims, retry metadata, and lock release |
 | `OrderFinalizationRetryJobTest` | service-order | 1 | Scheduled finalization recovery path continues processing due orders after one truly unexpected retry exception |
 | `PriceRuleControllerContractTest` | service-price | 2 | MockMvc server contracts for `POST /price-rule/is-latest` and `POST /price-rule/if-exists` — JSON request mapping, response schema, service delegation, and GET rejection |
-| `ServicePriceClientContractTest` | service-order | 3 | WireMock/OpenFeign client contracts for `POST /price-rule/is-latest` and `POST /price-rule/if-exists` — declared metadata, method, path, content type, JSON body, and response decoding |
+| `ServicePriceClientContractTest` | service-order | 4 | WireMock/OpenFeign client contracts for `POST /price-rule/is-latest`, `POST /price-rule/if-exists`, and `POST /calculate-price` — declared metadata, method, path, content type, JSON body or query parameters, and response decoding |
+| `ServiceMapClientContractTest` | service-order | 1 | WireMock/OpenFeign client contract for `POST /terminal/trsearch` — method, path, query parameters, and generic trace-response decoding |
+| `ServiceDriverUserClientContractTest` | service-order | 1 | WireMock/OpenFeign client contract for `GET /get-available-driver/{carId}` — method, path variable, and generic driver-response decoding |
 | `TerminalClientTest` | service-map | 3 | Amap track adapter duration units and empty-track domain failure — aggregate track milliseconds first, convert once to seconds, preserve distance in meters, and return a stable map failure when Amap has no tracks |
 | `PassengerPredictPriceServiceTest` | api-passenger | 1 | Passenger-edge price prediction preserves downstream service failure code and message instead of rewrapping as success |
 | `MapServiceClientTest` | service-map | 1 | Amap direction adapter surfaces invalid provider JSON as an exception instead of returning null |
@@ -179,7 +181,7 @@ Every pull request targeting `master` and every push to `master` triggers automa
 1. **Build** — `mvn clean install -DskipTests` (compile all 14 modules)
 2. **Test** — `mvn test` (run root-level tests across the full 14-module reactor)
 
-The 119 tests currently include 115 unit-style tests and 4 lightweight contract tests in `internal-common`, `api-passenger`, `service-price`, `service-order`, `service-map`, `security-support-core`, and `security-support-session`. The remaining modules do not have test classes yet; they still participate in the Maven reactor and will be included automatically as tests are added later. Integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
+The 128 tests currently include 121 unit-style tests and 7 lightweight contract tests in `internal-common`, `api-passenger`, `service-price`, `service-order`, `service-map`, `security-support-core`, and `security-support-session`. The remaining modules do not have test classes yet; they still participate in the Maven reactor and will be included automatically as tests are added later. Integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
 
 ### Database Change Management
 
@@ -222,8 +224,11 @@ This applies to datasource passwords, Nacos credentials, Redis settings, JWT sig
 
 - [`PredictPriceService.java`](service-price/src/main/java/com/george/serviceprice/service/PredictPriceService.java) — core pricing logic with BigDecimal precision fix
 - [`PredictPriceServiceTest.java`](service-price/src/test/java/com/george/serviceprice/service/PredictPriceServiceTest.java) — 18 tests including rounding boundary, input validation, cross-hour duration, and regression tests
-- [`OrderInfoServiceTest.java`](service-order/src/test/java/com/george/serviceorder/service/OrderInfoServiceTest.java) — 44 tests covering cancellation state machine, durable passenger get-off finalization, bounded retry, completion-time retry backoff, terminal CAS transitions, expired max-attempt lease handling, sanitized dependency exception handling, idempotent completed-order handling, fixed trace-search end time, invalid candidate handling, exhausted dispatch semantics, track-search failure propagation, pre-insert downstream failure propagation, and dispatch lock safety with Mockito
+- [`OrderInfoServiceTest.java`](service-order/src/test/java/com/george/serviceorder/service/OrderInfoServiceTest.java) — 50 tests covering cancellation state machine, passenger and driver fixed-Clock cancellation boundaries at 59/60/119/120 seconds, durable passenger get-off finalization, bounded retry, completion-time retry backoff, terminal CAS transitions, expired max-attempt lease handling, sanitized dependency exception handling, idempotent completed-order handling, fixed trace-search end time, invalid candidate handling, exhausted dispatch semantics, track-search failure propagation, pre-insert downstream failure propagation, and dispatch lock safety with Mockito
 - [`OrderFinalizationRetryJobTest.java`](service-order/src/test/java/com/george/serviceorder/job/OrderFinalizationRetryJobTest.java) — 1 test covering scheduled finalization recovery isolation when one retry fails with a truly unexpected exception
+- [`ServicePriceClientContractTest.java`](service-order/src/test/java/com/george/serviceorder/remote/ServicePriceClientContractTest.java) — 4 tests covering price-rule and actual-price OpenFeign contracts with WireMock
+- [`ServiceMapClientContractTest.java`](service-order/src/test/java/com/george/serviceorder/remote/ServiceMapClientContractTest.java) — 1 test covering the trace-search OpenFeign contract with WireMock
+- [`ServiceDriverUserClientContractTest.java`](service-order/src/test/java/com/george/serviceorder/remote/ServiceDriverUserClientContractTest.java) — 1 test covering the available-driver OpenFeign contract with WireMock
 - [`PassengerPredictPriceServiceTest.java`](api-passenger/src/test/java/com/george/apipassenger/service/PassengerPredictPriceServiceTest.java) — 1 test covering passenger-edge downstream failure propagation
 - [`PredictPriceFlowServiceTest.java`](service-price/src/test/java/com/george/serviceprice/service/PredictPriceFlowServiceTest.java) — 1 test covering map-service failure propagation before price-rule lookup
 - [`MapServiceClientTest.java`](service-map/src/test/java/com/george/servicemap/remote/MapServiceClientTest.java) — 1 test covering Amap direction parse failure surfacing
@@ -277,7 +282,7 @@ For `service-order`, activate a port profile when running locally, for example `
 
 ### Known Issues (documented with tests)
 - **Intermediate rounding:** `BigDecimalUtils.divide()` rounds to 2 decimal places at each step, causing 995m–1004m to all resolve as 1.00km. Characterization tests are in place; fix planned to defer rounding to the final calculation step.
-- **Cancel threshold readability:** `ChronoUnit.MINUTES.between() > 1` effectively means ≥ 2 minutes due to truncation. Semantically clearer as `>= 2`.
+- **Cancel threshold readability:** behavior is deterministically characterized as free before 120 seconds and penalty at/after 120 seconds; production expression readability remains deferred.
 - **Variable naming:** `distanceMiles` / `startMile` should be `distanceKm` / `startKm` to reflect actual units.
 - **SSE emitter registry thread safety:** `service-sse-push` currently stores `SseEmitter` instances in a static `HashMap` without completion, timeout, or error lifecycle callbacks. Planned fix: use `ConcurrentHashMap` with lifecycle-based cleanup.
 

@@ -22,10 +22,12 @@ import org.springframework.http.converter.json.MappingJackson2HttpMessageConvert
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.containing;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalToJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -118,6 +120,34 @@ class ServicePriceClientContractTest {
 
         assertEquals("POST", metadata.template().method());
         assertEquals("/price-rule/if-exists", metadata.template().url());
+    }
+
+    @Test
+    @DisplayName("ServicePriceClient sends POST query parameters and decodes actual price response")
+    void shouldSendPostQueryParametersAndDecodeResponse_whenCalculatingPrice() {
+        wireMockServer.stubFor(post(urlPathEqualTo("/calculate-price"))
+                .withQueryParam("distance", equalTo("5000"))
+                .withQueryParam("duration", equalTo("600"))
+                .withQueryParam("cityCode", equalTo("110000"))
+                .withQueryParam("vehicleType", equalTo("1"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                        .withBody("{\"code\":1,\"message\":\"success\",\"data\":19.0}")));
+
+        ServicePriceClient servicePriceClient = feignClient();
+
+        ResponseResult<Double> response = servicePriceClient.calculatePrice(5000, 600, "110000", "1");
+
+        assertNotNull(response);
+        assertEquals(1, response.getCode());
+        assertEquals("success", response.getMessage());
+        assertEquals(19.0, response.getData());
+        wireMockServer.verify(1, postRequestedFor(urlPathEqualTo("/calculate-price"))
+                .withQueryParam("distance", equalTo("5000"))
+                .withQueryParam("duration", equalTo("600"))
+                .withQueryParam("cityCode", equalTo("110000"))
+                .withQueryParam("vehicleType", equalTo("1")));
     }
 
     private ServicePriceClient feignClient() {

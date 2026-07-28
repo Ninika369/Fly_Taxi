@@ -1017,7 +1017,7 @@ public class OrderInfoService {
         OrderInfo orderInfo = orderInfoMapper.selectById(orderId);
         Integer orderStatus = orderInfo.getOrderStatus();
 
-        LocalDateTime cancelTime = LocalDateTime.now();
+        LocalDateTime cancelTime = LocalDateTime.now(clock);
         Integer cancelOperator = null;
         Integer cancelTypeCode = null;
 

@@ -38,18 +38,29 @@ public class DictDistrictService {
      */
     public ResponseResult initDicDistrict(String keywords) {
 
-        String dicDistrictResult = client.dicDistrict(keywords);
-        log.debug("Amap district response: {}", dicDistrictResult);
-        // interpret the result json object
-        JSONObject dicDistrictJsonObject = new JSONObject(dicDistrictResult);
-        int status = dicDistrictJsonObject.getInt(AmapConfigConstant.STATUS);
-        if (status != 1) {
-            ResponseResult.fail(CommonStatus.MAP_DISTRICT_ERROR.getCode(),
+        JSONArray countryArray;
+        try {
+            String dicDistrictResult = client.dicDistrict(keywords);
+            log.debug("Amap district response: {}", dicDistrictResult);
+            if (dicDistrictResult == null) {
+                return ResponseResult.fail(CommonStatus.MAP_DISTRICT_ERROR.getCode(),
+                        CommonStatus.MAP_DISTRICT_ERROR.getMessage());
+            }
+            // interpret the result json object
+            JSONObject dicDistrictJsonObject = new JSONObject(dicDistrictResult);
+            int status = dicDistrictJsonObject.getInt(AmapConfigConstant.STATUS);
+            if (status != 1) {
+                return ResponseResult.fail(CommonStatus.MAP_DISTRICT_ERROR.getCode(),
+                        CommonStatus.MAP_DISTRICT_ERROR.getMessage());
+            }
+            countryArray = dicDistrictJsonObject.getJSONArray(AmapConfigConstant.DISTRICTS);
+        } catch (Exception e) {
+            log.warn("Amap district response could not be processed; causeType={}", e.getClass().getSimpleName());
+            return ResponseResult.fail(CommonStatus.MAP_DISTRICT_ERROR.getCode(),
                     CommonStatus.MAP_DISTRICT_ERROR.getMessage());
         }
 
         // loop through each level to fill in the dictionary
-        JSONArray countryArray = dicDistrictJsonObject.getJSONArray(AmapConfigConstant.DISTRICTS);
         for (int i = 0; i < countryArray.length(); i++) {
             JSONObject countryObject  = countryArray.getJSONObject(i);
             String countryAddressCode = countryObject.getString(AmapConfigConstant.ADCODE);

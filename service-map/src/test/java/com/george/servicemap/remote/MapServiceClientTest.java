@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -32,14 +33,16 @@ class MapServiceClientTest {
 
     @Test
     @DisplayName("Invalid Amap direction JSON is surfaced as an exception")
-    void shouldThrowRuntimeException_whenDirectionResponseCannotBeParsed() {
+    void shouldThrowMapDirectionException_whenDirectionResponseCannotBeParsed() {
         when(restTemplate.getForEntity(anyString(), eq(String.class)))
                 .thenReturn(ResponseEntity.ok("{invalid-json"));
 
-        assertThrows(RuntimeException.class, () -> mapServiceClient.direction(
+        MapDirectionException exception = assertThrows(MapDirectionException.class, () -> mapServiceClient.direction(
                 "-36.8485",
                 "174.7633",
                 "-36.8519",
                 "174.7762"));
+
+        assertEquals("Invalid map direction response", exception.getMessage());
     }
 }

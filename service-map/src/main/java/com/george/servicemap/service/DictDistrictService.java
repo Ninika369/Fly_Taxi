@@ -55,7 +55,7 @@ public class DictDistrictService {
             }
             countryArray = dicDistrictJsonObject.getJSONArray(AmapConfigConstant.DISTRICTS);
         } catch (Exception e) {
-            log.warn("Amap district response could not be processed", e);
+            log.warn("Amap district response could not be processed; causeType={}", e.getClass().getSimpleName());
             return ResponseResult.fail(CommonStatus.MAP_DISTRICT_ERROR.getCode(),
                     CommonStatus.MAP_DISTRICT_ERROR.getMessage());
         }

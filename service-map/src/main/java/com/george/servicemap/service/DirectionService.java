@@ -39,7 +39,10 @@ public class DirectionService {
             directionResponse = mapServiceClient.direction(depLatitude, depLongitude,
                                                                             destLatitude, destLongitude);
         } catch (MapDirectionException e) {
-            log.warn("Map direction request failed", e);
+            String causeType = e.getCause() == null
+                    ? e.getClass().getSimpleName()
+                    : e.getCause().getClass().getSimpleName();
+            log.warn("Map direction request failed; causeType={}", causeType);
             return ResponseResult.fail(CommonStatus.MAP_DIRECTION_ERROR.getCode(),
                     CommonStatus.MAP_DIRECTION_ERROR.getMessage());
         }

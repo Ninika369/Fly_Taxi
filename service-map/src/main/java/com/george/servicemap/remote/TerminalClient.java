@@ -16,6 +16,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * This class is to deal with the terminal in a service, a terminal meaning a vehicle
@@ -158,7 +159,7 @@ public class TerminalClient {
         }
         JSONArray tracks = data.getJSONArray("tracks");
         long driveMile = 0L;
-        long driveTime = 0L;
+        long totalDurationMillis = 0L;
         for (int i=0;i<tracks.length();i++){
             JSONObject jsonObject = tracks.getJSONObject(i);
 
@@ -166,12 +167,11 @@ public class TerminalClient {
             driveMile = driveMile + distance;
 
             long time = jsonObject.getLong("time");
-            time = time / (1000 * 60);
-            driveTime = driveTime + time;
+            totalDurationMillis = totalDurationMillis + time;
         }
         TrsearchResponse trsearchResponse = new TrsearchResponse();
         trsearchResponse.setDriveMile(driveMile);
-        trsearchResponse.setDriveTime(driveTime);
+        trsearchResponse.setDriveTime(TimeUnit.MILLISECONDS.toSeconds(totalDurationMillis));
         return ResponseResult.success(trsearchResponse);
 
     }

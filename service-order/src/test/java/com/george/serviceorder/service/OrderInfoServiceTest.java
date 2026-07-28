@@ -3,13 +3,17 @@ package com.george.serviceorder.service;
 import com.george.internalCommon.constant.CommonStatus;
 import com.george.internalCommon.constant.OrderConstant;
 import com.george.internalCommon.constant.UserIdentity;
+import com.george.internalCommon.dto.Car;
 import com.george.internalCommon.dto.OrderInfo;
 import com.george.internalCommon.dto.ResponseResult;
+import com.george.internalCommon.request.OrderRequest;
 import com.george.internalCommon.response.OrderDriverResponse;
 import com.george.internalCommon.response.TerminalResponse;
+import com.george.internalCommon.response.TrsearchResponse;
 import com.george.serviceorder.mapper.OrderInfoMapper;
 import com.george.serviceorder.remote.ServiceDriverUserClient;
 import com.george.serviceorder.remote.ServiceMapClient;
+import com.george.serviceorder.remote.ServicePriceClient;
 import com.george.serviceorder.remote.ServiceSsePushClient;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -58,6 +62,9 @@ class OrderInfoServiceTest {
 
     @Mock
     ServiceSsePushClient serviceSsePushClient;
+
+    @Mock
+    ServicePriceClient servicePriceClient;
 
     @Mock
     RedissonClient redissonClient;
@@ -133,6 +140,43 @@ class OrderInfoServiceTest {
 
     private ResponseResult<List<TerminalResponse>> terminalSearchResult(List<TerminalResponse> terminals) {
         return ResponseResult.success(terminals);
+    }
+
+    // ======================== Passenger get-off pricing ========================
+
+    @Test
+    @DisplayName("Passenger get-off forwards ride duration in seconds to pricing")
+    void shouldForwardDriveDurationInSeconds_whenPassengerGetsOff() {
+        Long carId = 300L;
+        OrderRequest orderRequest = new OrderRequest();
+        orderRequest.setOrderId(ORDER_ID);
+        orderRequest.setPassengerGetoffLongitude("174.7762");
+        orderRequest.setPassengerGetoffLatitude("-36.8519");
+
+        orderInfo.setCarId(carId);
+        orderInfo.setPickUpPassengerTime(LocalDateTime.now().minusMinutes(10));
+        orderInfo.setAddress("110000");
+        orderInfo.setVehicleType("1");
+        when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo);
+
+        Car car = new Car();
+        car.setTid("tid-300");
+        when(serviceDriverUserClient.getCarById(carId)).thenReturn(ResponseResult.success(car));
+
+        TrsearchResponse trsearchResponse = new TrsearchResponse();
+        trsearchResponse.setDriveMile(5000L);
+        trsearchResponse.setDriveTime(600L);
+        when(serviceMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
+                .thenReturn(ResponseResult.success(trsearchResponse));
+        when(servicePriceClient.calculatePrice(5000, 600, "110000", "1"))
+                .thenReturn(ResponseResult.success(19.00));
+
+        orderInfoService.passengerGetoff(orderRequest);
+
+        verify(servicePriceClient, times(1)).calculatePrice(5000, 600, "110000", "1");
+        assertEquals(600L, orderInfo.getDriveTime());
+        assertEquals(19.00, orderInfo.getPrice());
+        verify(orderInfoMapper, times(1)).updateById(orderInfo);
     }
 
     // ======================== Passenger cancellation ========================

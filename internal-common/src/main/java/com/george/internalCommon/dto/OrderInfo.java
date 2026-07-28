@@ -208,7 +208,8 @@ public class OrderInfo implements Serializable {
     private Long driveMile;
 
     /**
-     * Time spent with passengers (in minutes)
+     * Time spent with passengers in seconds.
+     * Legacy field and column name retained until READ-02 database migration renames it.
      */
     private Long driveTime;
 

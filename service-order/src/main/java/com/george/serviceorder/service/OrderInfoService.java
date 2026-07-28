@@ -501,15 +501,15 @@ public class OrderInfoService {
         ResponseResult<TrsearchResponse> trsearch = serviceMapClient.trsearch(carById.getData().getTid(), starttime,endtime);
         TrsearchResponse data = trsearch.getData();
         Long driveMile = data.getDriveMile();
-        Long driveTime = data.getDriveTime();
+        Long driveDurationSeconds = data.getDriveTime();
 
         orderInfo.setDriveMile(driveMile);
-        orderInfo.setDriveTime(driveTime);
+        orderInfo.setDriveTime(driveDurationSeconds);
 
         // get the actual price
         String address = orderInfo.getAddress();
         String vehicleType = orderInfo.getVehicleType();
-        ResponseResult<Double> doubleResponseResult = servicePriceClient.calculatePrice(driveMile.intValue(), driveTime.intValue(), address, vehicleType);
+        ResponseResult<Double> doubleResponseResult = servicePriceClient.calculatePrice(driveMile.intValue(), driveDurationSeconds.intValue(), address, vehicleType);
         Double price = doubleResponseResult.getData();
         orderInfo.setPrice(price);
 

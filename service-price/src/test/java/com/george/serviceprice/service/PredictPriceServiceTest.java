@@ -117,6 +117,20 @@ class PredictPriceServiceTest {
         assertEquals(20.0, price, 1e-10);
     }
 
+    @Test
+    @DisplayName("One-hour trip: duration is charged as 60 minutes")
+    void shouldChargeSixtyMinutes_whenDurationIs3600Seconds() {
+        // distance: 0m = 0.00km
+        // duration: 3600s = 60.00min
+        //   startFare  = 10.00
+        //   mileageFee = 0.00
+        //   timeFee    = 60.00 * 0.5 = 30.00
+        //   total      = 40.00
+
+        double price = priceService.calculatePrice(0, 3600, standardRule);
+        assertEquals(40.00, price, 1e-10);
+    }
+
     // ======================== Rounding boundary tests ========================
     // These are CHARACTERIZATION TESTS — they document the CURRENT behavior,
     // including the intermediate rounding in BigDecimalUtils.divide().

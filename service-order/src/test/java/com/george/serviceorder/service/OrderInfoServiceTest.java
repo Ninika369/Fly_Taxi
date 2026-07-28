@@ -28,6 +28,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;    // Tells Mockito: "create this object and inject mocks into it"
 import org.mockito.Mock;            // Tells Mockito: "create a fake version of this"
 import org.mockito.junit.jupiter.MockitoExtension;  // Activates Mockito for JUnit 5
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;   // when(), verify(), any(), etc.
@@ -35,9 +38,11 @@ import static org.mockito.Mockito.*;   // when(), verify(), any(), etc.
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.TimeZone;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Unit tests for {@link OrderInfoService#cancel(Long, String)}.
@@ -69,6 +74,12 @@ class OrderInfoServiceTest {
 
     @Mock
     ServicePriceClient servicePriceClient;
+
+    @Mock
+    StringRedisTemplate stringRedisTemplate;
+
+    @Mock
+    ValueOperations<String, String> valueOperations;
 
     @Mock
     RedissonClient redissonClient;
@@ -306,6 +317,60 @@ class OrderInfoServiceTest {
         } finally {
             TimeZone.setDefault(originalTimeZone);
         }
+    }
+
+    @Test
+    @DisplayName("Passenger get-off preserves empty-track failure without pricing")
+    void shouldPreserveTrackEmptyFailure_whenPassengerGetsOff() {
+        Long carId = 300L;
+        OrderRequest orderRequest = new OrderRequest();
+        orderRequest.setOrderId(ORDER_ID);
+        orderRequest.setPassengerGetoffLongitude("174.7762");
+        orderRequest.setPassengerGetoffLatitude("-36.8519");
+
+        orderInfo.setCarId(carId);
+        orderInfo.setPickUpPassengerTime(LocalDateTime.now().minusMinutes(10));
+        when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo);
+
+        Car car = new Car();
+        car.setTid("tid-300");
+        when(serviceDriverUserClient.getCarById(carId)).thenReturn(ResponseResult.success(car));
+        when(serviceMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
+                .thenReturn(ResponseResult.fail(1402, "No track data is available for the requested interval"));
+
+        ResponseResult result = orderInfoService.passengerGetoff(orderRequest);
+
+        assertEquals(1402, result.getCode());
+        assertEquals("No track data is available for the requested interval", result.getMessage());
+        verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+    }
+
+    @Test
+    @DisplayName("Passenger get-off rejects successful track search without data")
+    void shouldReturnDownstreamResponseError_whenTrackSearchSucceedsWithoutData() {
+        Long carId = 300L;
+        OrderRequest orderRequest = new OrderRequest();
+        orderRequest.setOrderId(ORDER_ID);
+        orderRequest.setPassengerGetoffLongitude("174.7762");
+        orderRequest.setPassengerGetoffLatitude("-36.8519");
+
+        orderInfo.setCarId(carId);
+        orderInfo.setPickUpPassengerTime(LocalDateTime.now().minusMinutes(10));
+        when(orderInfoMapper.selectOne(any())).thenReturn(orderInfo);
+
+        Car car = new Car();
+        car.setTid("tid-300");
+        when(serviceDriverUserClient.getCarById(carId)).thenReturn(ResponseResult.success(car));
+        when(serviceMapClient.trsearch(eq("tid-300"), anyLong(), anyLong()))
+                .thenReturn(ResponseResult.success(null));
+
+        ResponseResult result = orderInfoService.passengerGetoff(orderRequest);
+
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
+        verify(servicePriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
     }
 
     // ======================== Passenger cancellation ========================
@@ -553,5 +618,75 @@ class OrderInfoServiceTest {
         verify(lock).lock();
         verify(lock).unlock();
         verify(orderInfoMapper).updateById(dispatchOrder);
+    }
+
+    @Test
+    @DisplayName("Dispatch skips invalid terminal search responses")
+    void shouldSkipInvalidTerminalSearchResponses_whenDispatching() {
+        OrderInfo dispatchOrder = dispatchOrder();
+        when(serviceMapClient.terminalAroundSearch(anyString(), anyInt()))
+                .thenReturn(null)
+                .thenReturn(ResponseResult.fail(1401, "map search failed"))
+                .thenReturn(ResponseResult.success(null));
+
+        int result = orderInfoService.dispatchRealTimeOrder(dispatchOrder);
+
+        assertEquals(0, result);
+        verify(serviceMapClient, times(3)).terminalAroundSearch(anyString(), anyInt());
+        verify(serviceDriverUserClient, never()).getAvailableDriver(anyLong());
+        verify(redissonClient, never()).getLock(anyString());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verify(serviceSsePushClient, never()).push(any());
+    }
+
+    @Test
+    @DisplayName("Dispatch skips invalid driver candidate responses")
+    void shouldSkipInvalidDriverCandidateResponses_whenDispatching() {
+        OrderInfo dispatchOrder = dispatchOrder();
+        Long carIdWithFailure = 300L;
+        Long carIdWithNullData = 301L;
+        when(serviceMapClient.terminalAroundSearch(anyString(), anyInt()))
+                .thenReturn(terminalSearchResult(Arrays.asList(terminal(carIdWithFailure), terminal(carIdWithNullData))))
+                .thenReturn(terminalSearchResult(Collections.emptyList()))
+                .thenReturn(terminalSearchResult(Collections.emptyList()));
+        when(serviceDriverUserClient.getAvailableDriver(carIdWithFailure))
+                .thenReturn(ResponseResult.fail(1500, "binding does not exist"));
+        when(serviceDriverUserClient.getAvailableDriver(carIdWithNullData))
+                .thenReturn(ResponseResult.success(null));
+
+        int result = orderInfoService.dispatchRealTimeOrder(dispatchOrder);
+
+        assertEquals(0, result);
+        verify(serviceDriverUserClient, times(2)).getAvailableDriver(anyLong());
+        verify(redissonClient, never()).getLock(anyString());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verify(serviceSsePushClient, never()).push(any());
+    }
+
+    @Test
+    @DisplayName("Order creation returns dispatch failure when all attempts are exhausted")
+    void shouldReturnDispatchFailure_whenAllAttemptsAreExhausted() {
+        OrderRequest orderRequest = newOrderRequest();
+        OrderInfoService spyService = spy(orderInfoService);
+        ReflectionTestUtils.setField(spyService, "dispatchRetryDelayMs", 0L);
+
+        when(servicePriceClient.ifPriceExists(any())).thenReturn(ResponseResult.success(true));
+        when(serviceDriverUserClient.isAvailableDriver("110000")).thenReturn(ResponseResult.success(true));
+        when(servicePriceClient.isLatest(any())).thenReturn(ResponseResult.success(true));
+        when(stringRedisTemplate.hasKey(anyString())).thenReturn(false);
+        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent(anyString(), anyString(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+        when(orderInfoMapper.selectCount(any())).thenReturn(0);
+        doReturn(0).when(spyService).dispatchRealTimeOrder(any(OrderInfo.class));
+
+        ResponseResult result = spyService.add(orderRequest);
+
+        assertEquals(1604, result.getCode());
+        assertEquals("No driver could be assigned to the order", result.getMessage());
+        verify(spyService, times(6)).dispatchRealTimeOrder(any(OrderInfo.class));
+        verify(orderInfoMapper, times(1)).insert(any(OrderInfo.class));
+        ArgumentCaptor<OrderInfo> invalidOrderCaptor = ArgumentCaptor.forClass(OrderInfo.class);
+        verify(orderInfoMapper, times(1)).updateById(invalidOrderCaptor.capture());
+        assertEquals(OrderConstant.ORDER_INVALID, invalidOrderCaptor.getValue().getOrderStatus());
     }
 }

@@ -23,7 +23,6 @@ import com.george.serviceorder.remote.ServicePriceClient;
 import com.george.serviceorder.remote.ServiceSsePushClient;
 import lombok.extern.slf4j.Slf4j;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -49,7 +48,7 @@ import java.util.concurrent.TimeUnit;
 public class OrderInfoService {
 
     private static final int MAX_DISPATCH_ATTEMPTS = 6;
-    private static final long DISPATCH_RETRY_DELAY_MS = TimeUnit.SECONDS.toMillis(20);
+    private long dispatchRetryDelayMs = TimeUnit.SECONDS.toMillis(20);
 
     // the mapper to interact with orderInfo database
     @Autowired
@@ -155,10 +154,12 @@ public class OrderInfoService {
                 // If there is no available driver, the order is invalid
                 orderInfo.setOrderStatus(OrderConstant.ORDER_INVALID);
                 orderInfoMapper.updateById(orderInfo);
+                return ResponseResult.fail(CommonStatus.DISPATCH_FAILED.getCode(),
+                        CommonStatus.DISPATCH_FAILED.getMessage());
             }else {
                 // wait for 20s
                 try {
-                    Thread.sleep(DISPATCH_RETRY_DELAY_MS);
+                    Thread.sleep(dispatchRetryDelayMs);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return ResponseResult.fail(CommonStatus.FAIL.getCode(), "Dispatch retry interrupted");
@@ -200,10 +201,23 @@ public class OrderInfoService {
             Integer radius = radiusList.get(i);
             listResponseResult = serviceMapClient.terminalAroundSearch(center,radius );
 
-            log.info("Searching for vehicles within {} meters, result: {}", radius, new JSONArray(listResponseResult.getData()).toString());
+            if (listResponseResult == null) {
+                log.warn("Dispatch terminal search skipped; radius={}, reason=null_response", radius);
+                continue;
+            }
+            if (listResponseResult.getCode() != CommonStatus.SUCCESS.getCode()) {
+                log.warn("Dispatch terminal search skipped; radius={}, responseCode={}",
+                        radius, listResponseResult.getCode());
+                continue;
+            }
 
             // analyze the terminal
             List<TerminalResponse> data = listResponseResult.getData();
+            if (data == null) {
+                log.warn("Dispatch terminal search skipped; radius={}, reason=null_data", radius);
+                continue;
+            }
+            log.debug("Dispatch terminal search succeeded; radius={}, candidateCount={}", radius, data.size());
 
             for (int j=0;j<data.size();j++){
                 TerminalResponse terminalResponse = data.get(j);
@@ -214,13 +228,24 @@ public class OrderInfoService {
 
                 // Check if there are any extra drivers available
                 ResponseResult<OrderDriverResponse> availableDriver = serviceDriverUserClient.getAvailableDriver(carId);
-                if(availableDriver.getCode() == CommonStatus.NO_AVAILABLE_DRIVER.getCode()){
+                if (availableDriver == null) {
+                    log.debug("Dispatch driver candidate skipped; carId={}, reason=null_response", carId);
+                    continue;
+                }
+                if (availableDriver.getCode() != CommonStatus.SUCCESS.getCode()) {
+                    log.debug("Dispatch driver candidate skipped; carId={}, responseCode={}",
+                            carId, availableDriver.getCode());
+                    continue;
+                }
+
+                // extract information from that driver
+                OrderDriverResponse orderDriverResponse = availableDriver.getData();
+                if (orderDriverResponse == null) {
+                    log.debug("Dispatch driver candidate skipped; carId={}, reason=null_data", carId);
                     continue;
                 }
                 else {
 
-                    // extract information from that driver
-                    OrderDriverResponse orderDriverResponse = availableDriver.getData();
                     Long driverId = orderDriverResponse.getDriverId();
                     String driverPhone = orderDriverResponse.getDriverPhone();
                     String licenseId = orderDriverResponse.getLicenseId();
@@ -531,9 +556,24 @@ public class OrderInfoService {
 
 
         ResponseResult<TrsearchResponse> trsearch = serviceMapClient.trsearch(carById.getData().getTid(), starttime,endtime);
+        if (trsearch == null) {
+            return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
+                    CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
+        }
+        if (trsearch.getCode() != CommonStatus.SUCCESS.getCode()) {
+            return ResponseResult.fail(trsearch.getCode(), trsearch.getMessage());
+        }
         TrsearchResponse data = trsearch.getData();
+        if (data == null) {
+            return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
+                    CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
+        }
         Long driveMile = data.getDriveMile();
         Long driveDurationSeconds = data.getDriveTime();
+        if (driveMile == null || driveDurationSeconds == null) {
+            return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
+                    CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
+        }
 
         orderInfo.setDriveMile(driveMile);
         orderInfo.setDriveTime(driveDurationSeconds);

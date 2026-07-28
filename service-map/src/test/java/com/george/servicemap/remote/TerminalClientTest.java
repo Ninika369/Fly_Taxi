@@ -14,6 +14,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -72,5 +73,26 @@ class TerminalClientTest {
 
         assertEquals(3000L, result.getData().getDriveMile());
         assertEquals(75L, result.getData().getDriveTime());
+    }
+
+    @Test
+    @DisplayName("Amap track search with no tracks returns a domain failure")
+    void shouldReturnTrackEmptyFailure_whenAmapHasNoTracks() {
+        when(restTemplate.getForEntity(anyString(), eq(String.class)))
+                .thenReturn(ResponseEntity.ok("{"
+                        + "\"errcode\":10000,"
+                        + "\"errmsg\":\"OK\","
+                        + "\"data\":{"
+                        + "\"counts\":0,"
+                        + "\"tracks\":[]"
+                        + "}"
+                        + "}"));
+
+        ResponseResult<TrsearchResponse> result = terminalClient.trsearch("tid-1", 1000L, 2000L);
+
+        assertNotNull(result);
+        assertEquals(1402, result.getCode());
+        assertEquals("No track data is available for the requested interval", result.getMessage());
+        assertEquals(null, result.getData());
     }
 }

@@ -134,19 +134,19 @@ flowchart LR
 
 ## Engineering Practices
 
-### Test Automation — 96 CI-verified tests across 20 test classes
+### Test Automation — 102 CI-verified tests across 20 test classes
 
-The CI pipeline runs root-level `mvn test` across the full 14-module Maven reactor. The repository currently has 96 CI-verified tests: 92 unit-style tests and 4 lightweight HTTP contract tests. None require a full Spring application context or external MySQL, Redis, or Nacos infrastructure. MockMvc verifies the server-side controller contract, while WireMock exercises the OpenFeign client's HTTP method, path, JSON body, content type, and response decoding. These tests currently live in `internal-common`, `api-passenger`, `service-price`, `service-order`, `service-map`, `security-support-core`, and `security-support-session`; modules without test classes still participate in the reactor and will automatically be covered as tests are added later.
+The CI pipeline runs root-level `mvn test` across the full 14-module Maven reactor. The repository currently has 102 CI-verified tests: 98 unit-style tests and 4 lightweight HTTP contract tests. None require a full Spring application context or external MySQL, Redis, or Nacos infrastructure. MockMvc verifies the server-side controller contract, while WireMock exercises the OpenFeign client's HTTP method, path, JSON body, content type, and response decoding. These tests currently live in `internal-common`, `api-passenger`, `service-price`, `service-order`, `service-map`, `security-support-core`, and `security-support-session`; modules without test classes still participate in the reactor and will automatically be covered as tests are added later.
 
 | Test Class | Module | Tests | What It Covers |
 |-----------|--------|-------|----------------|
 | `BigDecimalUtilsTest` | internal-common | 11 | Arithmetic precision — add, subtract, multiply, divide, edge cases (zero, negative, divide-by-zero) |
 | `PredictPriceServiceTest` | service-price | 18 | Pricing formula — normal trips, short trips, traffic jams, cross-hour duration, rounding boundaries (995m/1004m/1005m), duration staircase, input validation for invalid distance/duration/null inputs, regression tests for .005 precision fix |
 | `PriceRuleServiceTest` | service-price | 8 | Rule versioning — create, edit with change detection, duplicate rejection, fareType composition, version auto-increment |
-| `OrderInfoServiceTest` | service-order | 23 | Order cancellation state machine, passenger get-off duration forwarding, trace-search UTC window, dispatch lock safety, and pre-insert downstream failure propagation — 5 passenger states, 4 driver states, time boundary (1m59s free vs 2m0s penalty), Mockito verify() for DB writes and lock release |
+| `OrderInfoServiceTest` | service-order | 28 | Order cancellation state machine, passenger get-off duration forwarding, trace-search UTC window, dispatch lock safety, invalid candidate handling, exhausted dispatch semantics, track-search failure propagation, and pre-insert downstream failure propagation — 5 passenger states, 4 driver states, time boundary (1m59s free vs 2m0s penalty), Mockito verify() for DB writes and lock release |
 | `PriceRuleControllerContractTest` | service-price | 2 | MockMvc server contracts for `POST /price-rule/is-latest` and `POST /price-rule/if-exists` — JSON request mapping, response schema, service delegation, and GET rejection |
 | `ServicePriceClientContractTest` | service-order | 3 | WireMock/OpenFeign client contracts for `POST /price-rule/is-latest` and `POST /price-rule/if-exists` — declared metadata, method, path, content type, JSON body, and response decoding |
-| `TerminalClientTest` | service-map | 2 | Amap track adapter duration units — aggregate track milliseconds first, convert once to seconds, and preserve distance in meters |
+| `TerminalClientTest` | service-map | 3 | Amap track adapter duration units and empty-track domain failure — aggregate track milliseconds first, convert once to seconds, preserve distance in meters, and return a stable map failure when Amap has no tracks |
 | `PassengerPredictPriceServiceTest` | api-passenger | 1 | Passenger-edge price prediction preserves downstream service failure code and message instead of rewrapping as success |
 | `MapServiceClientTest` | service-map | 1 | Amap direction adapter surfaces invalid provider JSON as an exception instead of returning null |
 | `DirectionServiceTest` | service-map | 1 | Direction service converts map adapter failure into a stable map-direction domain failure |
@@ -178,7 +178,7 @@ Every pull request targeting `master` and every push to `master` triggers automa
 1. **Build** — `mvn clean install -DskipTests` (compile all 14 modules)
 2. **Test** — `mvn test` (run root-level tests across the full 14-module reactor)
 
-The 96 tests currently include 92 unit-style tests and 4 lightweight contract tests in `internal-common`, `api-passenger`, `service-price`, `service-order`, `service-map`, `security-support-core`, and `security-support-session`. The remaining modules do not have test classes yet; they still participate in the Maven reactor and will be included automatically as tests are added later. Integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
+The 102 tests currently include 98 unit-style tests and 4 lightweight contract tests in `internal-common`, `api-passenger`, `service-price`, `service-order`, `service-map`, `security-support-core`, and `security-support-session`. The remaining modules do not have test classes yet; they still participate in the Maven reactor and will be included automatically as tests are added later. Integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
 
 ### API Documentation — OpenAPI / Swagger
 
@@ -206,13 +206,13 @@ This applies to datasource passwords, Nacos credentials, Redis settings, JWT sig
 
 - [`PredictPriceService.java`](service-price/src/main/java/com/george/serviceprice/service/PredictPriceService.java) — core pricing logic with BigDecimal precision fix
 - [`PredictPriceServiceTest.java`](service-price/src/test/java/com/george/serviceprice/service/PredictPriceServiceTest.java) — 18 tests including rounding boundary, input validation, cross-hour duration, and regression tests
-- [`OrderInfoServiceTest.java`](service-order/src/test/java/com/george/serviceorder/service/OrderInfoServiceTest.java) — 23 tests covering cancellation state machine, duration forwarding, trace-search UTC window, pre-insert downstream failure propagation, and dispatch lock safety with Mockito
+- [`OrderInfoServiceTest.java`](service-order/src/test/java/com/george/serviceorder/service/OrderInfoServiceTest.java) — 28 tests covering cancellation state machine, duration forwarding, trace-search UTC window, invalid candidate handling, exhausted dispatch semantics, track-search failure propagation, pre-insert downstream failure propagation, and dispatch lock safety with Mockito
 - [`PassengerPredictPriceServiceTest.java`](api-passenger/src/test/java/com/george/apipassenger/service/PassengerPredictPriceServiceTest.java) — 1 test covering passenger-edge downstream failure propagation
 - [`PredictPriceFlowServiceTest.java`](service-price/src/test/java/com/george/serviceprice/service/PredictPriceFlowServiceTest.java) — 1 test covering map-service failure propagation before price-rule lookup
 - [`MapServiceClientTest.java`](service-map/src/test/java/com/george/servicemap/remote/MapServiceClientTest.java) — 1 test covering Amap direction parse failure surfacing
 - [`DirectionServiceTest.java`](service-map/src/test/java/com/george/servicemap/service/DirectionServiceTest.java) — 1 test covering map adapter failure translation
 - [`DictDistrictServiceTest.java`](service-map/src/test/java/com/george/servicemap/service/DictDistrictServiceTest.java) — 1 test covering Amap district status failure handling
-- [`TerminalClientTest.java`](service-map/src/test/java/com/george/servicemap/remote/TerminalClientTest.java) — 2 tests covering Amap track duration conversion from milliseconds to seconds
+- [`TerminalClientTest.java`](service-map/src/test/java/com/george/servicemap/remote/TerminalClientTest.java) — 3 tests covering Amap track duration conversion from milliseconds to seconds and empty-track domain failure
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — CI pipeline configuration
 
 ---

@@ -134,9 +134,9 @@ flowchart LR
 
 ## Engineering Practices
 
-### Test Automation — 80 CI-verified tests across 14 test classes
+### Test Automation — 83 CI-verified tests across 14 test classes
 
-The CI pipeline runs root-level `mvn test` across the full 14-module Maven reactor. The repository currently has 80 CI-verified tests: 78 pure unit tests and 2 lightweight HTTP contract tests. None require a full Spring application context or external MySQL, Redis, or Nacos infrastructure. MockMvc verifies the server-side controller contract, while WireMock exercises the OpenFeign client's HTTP method, path, JSON body, content type, and response decoding. These tests currently live in `internal-common`, `service-price`, `service-order`, `security-support-core`, and `security-support-session`; modules without test classes still participate in the reactor and will automatically be covered as tests are added later.
+The CI pipeline runs root-level `mvn test` across the full 14-module Maven reactor. The repository currently has 83 CI-verified tests: 79 unit-style tests and 4 lightweight HTTP contract tests. None require a full Spring application context or external MySQL, Redis, or Nacos infrastructure. MockMvc verifies the server-side controller contract, while WireMock exercises the OpenFeign client's HTTP method, path, JSON body, content type, and response decoding. These tests currently live in `internal-common`, `service-price`, `service-order`, `security-support-core`, and `security-support-session`; modules without test classes still participate in the reactor and will automatically be covered as tests are added later.
 
 | Test Class | Module | Tests | What It Covers |
 |-----------|--------|-------|----------------|
@@ -144,8 +144,8 @@ The CI pipeline runs root-level `mvn test` across the full 14-module Maven react
 | `PredictPriceServiceTest` | service-price | 17 | Pricing formula — normal trips, short trips, traffic jams, rounding boundaries (995m/1004m/1005m), duration staircase, input validation for invalid distance/duration/null inputs, regression tests for .005 precision fix |
 | `PriceRuleServiceTest` | service-price | 8 | Rule versioning — create, edit with change detection, duplicate rejection, fareType composition, version auto-increment |
 | `OrderInfoServiceTest` | service-order | 18 | Order cancellation state machine and dispatch lock safety — 5 passenger states, 4 driver states, time boundary (1m59s free vs 2m0s penalty), Mockito verify() for DB writes and lock release |
-| `PriceRuleControllerContractTest` | service-price | 1 | MockMvc server contract for `POST /price-rule/is-latest` — JSON request mapping, response schema, and service delegation |
-| `ServicePriceClientContractTest` | service-order | 1 | WireMock/OpenFeign client contract for `POST /price-rule/is-latest` — method, path, content type, JSON body, and response decoding |
+| `PriceRuleControllerContractTest` | service-price | 2 | MockMvc server contracts for `POST /price-rule/is-latest` and `POST /price-rule/if-exists` — JSON request mapping, response schema, service delegation, and GET rejection |
+| `ServicePriceClientContractTest` | service-order | 3 | WireMock/OpenFeign client contracts for `POST /price-rule/is-latest` and `POST /price-rule/if-exists` — declared metadata, method, path, content type, JSON body, and response decoding |
 | `RequestPrincipalTest` | security-support-core | 3 | Shared-principal value semantics, refresh-token rejection, and framework-neutral field-type guard |
 | `TokenClaimsTest` | security-support-core | 3 | Typed claim invariants, required text validation, and strict timestamp ordering |
 | `SecurityFailureCodeTest` | security-support-core | 2 | Stable authentication-versus-authorization failure classification |
@@ -172,7 +172,7 @@ Every pull request targeting `master` and every push to `master` triggers automa
 1. **Build** — `mvn clean install -DskipTests` (compile all 14 modules)
 2. **Test** — `mvn test` (run root-level tests across the full 14-module reactor)
 
-The 80 tests currently include 78 unit tests and 2 lightweight contract tests in `internal-common`, `service-price`, `service-order`, `security-support-core`, and `security-support-session`. The remaining modules do not have test classes yet; they still participate in the Maven reactor and will be included automatically as tests are added later. Integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
+The 83 tests currently include 79 unit-style tests and 4 lightweight contract tests in `internal-common`, `service-price`, `service-order`, `security-support-core`, and `security-support-session`. The remaining modules do not have test classes yet; they still participate in the Maven reactor and will be included automatically as tests are added later. Integration tests against live infrastructure such as MySQL, Redis, and Nacos are on the roadmap.
 
 ### API Documentation — OpenAPI / Swagger
 

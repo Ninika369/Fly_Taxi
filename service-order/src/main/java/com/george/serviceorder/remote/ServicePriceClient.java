@@ -17,7 +17,7 @@ public interface ServicePriceClient {
     @PostMapping("/price-rule/is-latest")
     ResponseResult<Boolean> isLatest(@RequestBody PriceRuleIsNewRequest priceRuleIsNewRequest);
 
-    @RequestMapping(method = RequestMethod.GET,value = "/price-rule/if-exists")
+    @RequestMapping(method = RequestMethod.POST,value = "/price-rule/if-exists")
     ResponseResult<Boolean> ifPriceExists(@RequestBody PriceRule priceRule);
 
     @RequestMapping(method = RequestMethod.POST, value = "/calculate-price")

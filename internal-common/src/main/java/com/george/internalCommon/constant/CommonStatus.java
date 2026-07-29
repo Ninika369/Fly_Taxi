@@ -70,6 +70,7 @@ public enum CommonStatus {
     FINALIZATION_RETRY_SCHEDULED(1606, "Order finalization is pending retry"),
     ORDER_NOT_FOUND(1607, "Order does not exist"),
     ORDER_FINALIZATION_NOT_ALLOWED(1608, "Order cannot be finalized from its current state"),
+    FINALIZATION_RECOVERY_SCHEDULED(1609, "Failed order finalization recovery is scheduled"),
 
     // downstream or integration response errors, from 1700-1799
     DOWNSTREAM_RESPONSE_ERROR(1700, "Downstream service returned an invalid response"),

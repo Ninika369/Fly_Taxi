@@ -14,10 +14,13 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+
+import java.util.concurrent.TimeUnit;
 
 @ExtendWith(MockitoExtension.class)
 class TerminalClientTest {
@@ -63,16 +66,21 @@ class TerminalClientTest {
                         + "\"data\":{"
                         + "\"counts\":2,"
                         + "\"tracks\":["
-                        + "{\"distance\":1000,\"time\":30000},"
-                        + "{\"distance\":2000,\"time\":45000}"
+                        + "{\"distance\":1000,\"time\":30500},"
+                        + "{\"distance\":2000,\"time\":45500}"
                         + "]"
                         + "}"
                         + "}"));
 
         ResponseResult<TrsearchResponse> result = terminalClient.trsearch("tid-1", 1000L, 2000L);
+        long perSegmentTruncated =
+                TimeUnit.MILLISECONDS.toSeconds(30500L)
+                        + TimeUnit.MILLISECONDS.toSeconds(45500L);
 
         assertEquals(3000L, result.getData().getDriveMile());
-        assertEquals(75L, result.getData().getDriveTime());
+        assertEquals(76L, result.getData().getDriveTime());
+        assertEquals(75L, perSegmentTruncated);
+        assertNotEquals(perSegmentTruncated, result.getData().getDriveTime());
     }
 
     @Test

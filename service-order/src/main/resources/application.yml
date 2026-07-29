@@ -22,6 +22,27 @@ amap:
   key: "${AMAP_KEY:}"
   sid: "${AMAP_SID:}"
 
+order:
+  finalization:
+    max-attempts: "${ORDER_FINALIZATION_MAX_ATTEMPTS:3}"
+    base-retry-delay-seconds: "${ORDER_FINALIZATION_BASE_RETRY_DELAY_SECONDS:30}"
+    max-retry-delay-seconds: "${ORDER_FINALIZATION_MAX_RETRY_DELAY_SECONDS:900}"
+    processing-lease-seconds: "${ORDER_FINALIZATION_PROCESSING_LEASE_SECONDS:120}"
+    lease-safety-margin-ms: "${ORDER_FINALIZATION_LEASE_SAFETY_MARGIN_MS:30000}"
+
+feign:
+  client:
+    config:
+      finalizationDriverUserClient:
+        connectTimeout: "${ORDER_FINALIZATION_DRIVER_CONNECT_TIMEOUT_MS:2000}"
+        readTimeout: "${ORDER_FINALIZATION_DRIVER_READ_TIMEOUT_MS:10000}"
+      finalizationMapClient:
+        connectTimeout: "${ORDER_FINALIZATION_MAP_CONNECT_TIMEOUT_MS:2000}"
+        readTimeout: "${ORDER_FINALIZATION_MAP_READ_TIMEOUT_MS:30000}"
+      finalizationPriceClient:
+        connectTimeout: "${ORDER_FINALIZATION_PRICE_CONNECT_TIMEOUT_MS:2000}"
+        readTimeout: "${ORDER_FINALIZATION_PRICE_READ_TIMEOUT_MS:10000}"
+
 ---
 spring:
   profiles: 8089

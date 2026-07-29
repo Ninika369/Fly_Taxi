@@ -7,6 +7,16 @@
 --
 -- RULES
 -- This file is read-only. Every query documents its expected result.
+-- The finalization max-attempt limit is configurable. If
+-- ORDER_FINALIZATION_MAX_ATTEMPTS is not overridden, this verification uses the
+-- repository default of 3. If the environment overrides that value, the operator
+-- must set @order_finalization_max_attempts to the same value in this
+-- verification session and record it with the rollout evidence.
+
+-- OPERATOR SESSION PARAMETER
+-- Expected result: the effective configured max-attempt value used by the
+-- service-order deployment being verified.
+SELECT COALESCE(@order_finalization_max_attempts, 3) AS effective_order_finalization_max_attempts;
 
 -- PRE-FLIGHT ASSERTION
 -- Expected result before migration: one row showing the order_info table exists.
@@ -116,12 +126,13 @@ WHERE finalization_attempts IS NULL;
 
 -- POST-MIGRATION ASSERTION
 -- Expected result for healthy pending rows: rows with status 10 should have retry metadata.
+-- finalization_attempts = 0 is legal for a status-10 recovery-scheduled row.
 SELECT COUNT(*) AS pending_rows_missing_retry_metadata
 FROM order_info
 WHERE order_status = 10
   AND (
       finalization_attempts IS NULL
-      OR finalization_attempts <= 0
+      OR finalization_attempts < 0
       OR finalization_trace_end_epoch_ms IS NULL
       OR finalization_next_retry_at IS NULL
   );
@@ -134,18 +145,26 @@ WHERE order_status = 11
   AND finalization_next_retry_at IS NOT NULL;
 
 -- POST-MIGRATION ASSERTION
--- Expected result: zero rows; attempts are bounded by the service-order retry limit.
+-- Expected result: zero rows; pending attempts are bounded by the effective
+-- service-order retry limit. Failed status 11 rows and completed rows may come
+-- from a different historical max-attempt configuration and are intentionally
+-- not checked against the current value.
 SELECT COUNT(*) AS rows_exceeding_finalization_attempt_limit
 FROM order_info
-WHERE finalization_attempts > 3;
+WHERE order_status = 10
+  AND finalization_attempts > COALESCE(@order_finalization_max_attempts, 3);
 
 -- POST-MIGRATION ASSERTION
 -- Expected result after the scheduler runs: zero rows; expired max-attempt leases should become status 11.
+-- NULL finalization_next_retry_at is due under current production semantics.
 SELECT COUNT(*) AS expired_max_attempt_pending_rows
 FROM order_info
 WHERE order_status = 10
-  AND finalization_attempts >= 3
-  AND finalization_next_retry_at <= NOW();
+  AND finalization_attempts >= COALESCE(@order_finalization_max_attempts, 3)
+  AND (
+      finalization_next_retry_at IS NULL
+      OR finalization_next_retry_at <= NOW()
+  );
 
 -- POST-MIGRATION ASSERTION
 -- Expected result: zero rows; terminal completed rows should not retain retry scheduling.

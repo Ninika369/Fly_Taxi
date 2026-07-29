@@ -71,7 +71,7 @@ If a legacy writer loses its CAS, it rereads the order and returns a stable doma
 - status 10 or 11: 1611;
 - any other state: 1610.
 
-`cancel()` has an explicit negative fence for statuses 10 and 11 and returns 1611 without writing. Other cancellation legality rules remain unchanged and are deferred to Batch B lifecycle and authorization governance.
+`cancel()` uses snapshot-status CAS for its final write. If the CAS is lost, it rereads the order; statuses 10 and 11 return 1611 without being overwritten. Other cancellation legality rules remain unchanged and are deferred to Batch B lifecycle and authorization governance. This closes the read-then-write race for finalization-owned states without implementing the broader Batch B principal, role, or ownership model.
 
 `ORDER_FINALIZATION_NOT_ALLOWED` (1608) remains reserved for callers that enter the finalization path when the current order state is not eligible for finalization. Legacy lifecycle, payment, and cancellation writers use `ORDER_STATE_TRANSITION_NOT_ALLOWED` (1610) or `FINALIZATION_IN_PROGRESS` (1611) instead.
 

@@ -154,6 +154,8 @@ class OrderInfoServiceTest {
 
     // ---- Helper: tell the fake mapper to return our prepared orderInfo ----
     private void givenOrderWithStatus(int status) {
+        Clock fixedClock = Clock.fixed(CANCELLATION_NOW, TEST_ZONE);
+        ReflectionTestUtils.setField(orderInfoService, "clock", fixedClock);
         orderInfo.setOrderStatus(status);
         // This is the core Mockito syntax:
         // "when someone calls selectById(ORDER_ID), return our orderInfo"
@@ -161,8 +163,10 @@ class OrderInfoServiceTest {
     }
 
     private void givenOrderAcceptedMinutesAgo(int minutesAgo) {
+        Clock fixedClock = Clock.fixed(CANCELLATION_NOW, TEST_ZONE);
+        ReflectionTestUtils.setField(orderInfoService, "clock", fixedClock);
         orderInfo.setOrderStatus(OrderConstant.DRIVER_RECEIVE_ORDER);
-        orderInfo.setReceiveOrderTime(LocalDateTime.now().minusMinutes(minutesAgo));
+        orderInfo.setReceiveOrderTime(LocalDateTime.now(fixedClock).minusMinutes(minutesAgo));
         when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(orderInfo);
     }
 
@@ -180,11 +184,9 @@ class OrderInfoServiceTest {
 
     private void assertSuccessfulCancellation(ResponseResult result, int expectedCancelTypeCode, String identity) {
         assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
-        assertEquals(expectedCancelTypeCode, orderInfo.getCancelTypeCode());
-        assertEquals(cancellationNow(), orderInfo.getCancelTime());
-        assertEquals(Integer.valueOf(identity), orderInfo.getCancelOperator());
-        assertEquals(OrderConstant.ORDER_CANCEL, orderInfo.getOrderStatus());
-        verify(orderInfoMapper, times(1)).updateById(orderInfo);
+        assertCancellationUpdate(captureSingleLegacyUpdate(), orderInfo.getOrderStatus(),
+                expectedCancelTypeCode, identity);
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
     }
 
     private OrderInfo dispatchOrder() {
@@ -291,6 +293,14 @@ class OrderInfoServiceTest {
     }
 
     private void givenFinalizationClaimIsLost() {
+        when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(0);
+    }
+
+    private void givenCancellationUpdateSucceeds() {
+        when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
+    }
+
+    private void givenCancellationUpdateLoses() {
         when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(0);
     }
 
@@ -423,6 +433,27 @@ class OrderInfoServiceTest {
         return captor.getValue();
     }
 
+    private void assertCancellationUpdate(UpdateWrapper<OrderInfo> updateWrapper,
+                                          int snapshotStatus,
+                                          int expectedCancelTypeCode,
+                                          String identity) {
+        String where = updateWrapper.getSqlSegment();
+        assertTrue(where.contains("id"), where);
+        assertTrue(where.contains("order_status"), where);
+        assertWrapperContainsValue(updateWrapper, ORDER_ID);
+        assertWrapperContainsValue(updateWrapper, snapshotStatus);
+        assertSqlSetContains(updateWrapper, "cancel_type_code");
+        assertSqlSetContains(updateWrapper, "cancel_time");
+        assertSqlSetContains(updateWrapper, "cancel_operator");
+        assertSqlSetContains(updateWrapper, "order_status");
+        assertWrapperContainsValue(updateWrapper, expectedCancelTypeCode);
+        assertWrapperContainsValue(updateWrapper, cancellationNow());
+        assertWrapperContainsValue(updateWrapper, Integer.parseInt(identity));
+        assertWrapperContainsValue(updateWrapper, OrderConstant.ORDER_CANCEL);
+        assertSqlSetContainsSelfAssignment(updateWrapper, "gmt_create");
+        assertSqlSetContainsSelfAssignment(updateWrapper, "gmt_modified");
+    }
+
     private OrderInfo orderWithStatus(int status) {
         OrderInfo order = new OrderInfo();
         order.setId(ORDER_ID);
@@ -434,6 +465,12 @@ class OrderInfoServiceTest {
     private void assertNoLegacyTransitionSideEffects() {
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
         verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
+        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient,
+                serviceSsePushClient, finalizationDriverUserClient, finalizationMapClient,
+                finalizationPriceClient);
+    }
+
+    private void assertNoRemoteInteractions() {
         verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient,
                 serviceSsePushClient, finalizationDriverUserClient, finalizationMapClient,
                 finalizationPriceClient);
@@ -1620,56 +1657,55 @@ class OrderInfoServiceTest {
     @DisplayName("Passenger cancels at status 1 (created): free cancellation")
     void should_cancelFree_when_passengerCancelsAtOrderStart() {
         givenOrderWithStatus(OrderConstant.ORDER_START);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
 
-        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
-        assertEquals(OrderConstant.CANCEL_PASSENGER_BEFORE, orderInfo.getCancelTypeCode());
-        assertEquals(OrderConstant.ORDER_CANCEL, orderInfo.getOrderStatus());
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_PASSENGER_BEFORE, PASSENGER);
     }
 
     @Test
     @DisplayName("Passenger cancels at status 2 within 1 minute: free cancellation")
     void should_cancelFree_when_passengerCancelsQuicklyAfterDriverAccepts() {
         givenOrderAcceptedMinutesAgo(1);  // just accepted, 1 minutes ago
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
 
-        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
-        assertEquals(OrderConstant.CANCEL_PASSENGER_BEFORE, orderInfo.getCancelTypeCode());
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_PASSENGER_BEFORE, PASSENGER);
     }
 
     @Test
     @DisplayName("Passenger cancels at status 2 after more than 1 full minute: penalty")
     void should_penalize_when_passengerCancelsLateAfterDriverAccepts() {
         givenOrderAcceptedMinutesAgo(3);  // 3 full minutes ago
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
 
-        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
-        assertEquals(OrderConstant.CANCEL_PASSENGER_ILLEGAL, orderInfo.getCancelTypeCode());
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_PASSENGER_ILLEGAL, PASSENGER);
     }
 
     @Test
     @DisplayName("Passenger cancels at status 3 (driver en route): always penalty")
     void should_penalize_when_passengerCancelsWhileDriverEnRoute() {
         givenOrderWithStatus(OrderConstant.DRIVER_TO_PICK_UP_PASSENGER);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
 
-        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
-        assertEquals(OrderConstant.CANCEL_PASSENGER_ILLEGAL, orderInfo.getCancelTypeCode());
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_PASSENGER_ILLEGAL, PASSENGER);
     }
 
     @Test
     @DisplayName("Passenger cancels at status 4 (driver arrived): always penalty")
     void should_penalize_when_passengerCancelsAfterDriverArrived() {
         givenOrderWithStatus(OrderConstant.DRIVER_ARRIVED_DEPARTURE);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
 
-        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
-        assertEquals(OrderConstant.CANCEL_PASSENGER_ILLEGAL, orderInfo.getCancelTypeCode());
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_PASSENGER_ILLEGAL, PASSENGER);
     }
 
     @Test
@@ -1698,35 +1734,37 @@ class OrderInfoServiceTest {
     @DisplayName("Driver cancels at status 2 within 1 minute: free cancellation")
     void should_cancelFree_when_driverCancelsQuicklyAfterAccepting() {
         givenOrderAcceptedMinutesAgo(0);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, DRIVER);
 
-        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
-        assertEquals(OrderConstant.CANCEL_DRIVER_BEFORE, orderInfo.getCancelTypeCode());
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_DRIVER_BEFORE, DRIVER);
     }
 
     @Test
     @DisplayName("Driver cancels at status 2 after more than 1 full minute: penalty")
     void should_penalize_when_driverCancelsLateAfterAccepting() {
         givenOrderAcceptedMinutesAgo(3);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, DRIVER);
 
-        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
-        assertEquals(OrderConstant.CANCEL_DRIVER_ILLEGAL, orderInfo.getCancelTypeCode());
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_DRIVER_ILLEGAL, DRIVER);
     }
 
     @Test
     @DisplayName("Driver cancels at status 3 (en route) after 3 minutes: penalty")
     void should_penalize_when_driverCancelsWhileEnRouteAfterTime() {
+        Clock fixedClock = Clock.fixed(CANCELLATION_NOW, TEST_ZONE);
+        ReflectionTestUtils.setField(orderInfoService, "clock", fixedClock);
         orderInfo.setOrderStatus(OrderConstant.DRIVER_TO_PICK_UP_PASSENGER);
-        orderInfo.setReceiveOrderTime(LocalDateTime.now().minusMinutes(3));
+        orderInfo.setReceiveOrderTime(LocalDateTime.now(fixedClock).minusMinutes(3));
         when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(orderInfo);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, DRIVER);
 
-        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
-        assertEquals(OrderConstant.CANCEL_DRIVER_ILLEGAL, orderInfo.getCancelTypeCode());
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_DRIVER_ILLEGAL, DRIVER);
     }
 
     @Test
@@ -1760,6 +1798,7 @@ class OrderInfoServiceTest {
     @DisplayName("Passenger cancellation at 59 seconds remains free")
     void shouldAllowFreePassengerCancellationAt59Seconds() {
         givenAcceptedOrderSecondsAgo(59);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
 
@@ -1770,6 +1809,7 @@ class OrderInfoServiceTest {
     @DisplayName("Passenger cancellation at 60 seconds remains free")
     void shouldAllowFreePassengerCancellationAt60Seconds() {
         givenAcceptedOrderSecondsAgo(60);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
 
@@ -1780,6 +1820,7 @@ class OrderInfoServiceTest {
     @DisplayName("Passenger cancellation at 119 seconds remains free")
     void shouldAllowFreePassengerCancellationAt119Seconds() {
         givenAcceptedOrderSecondsAgo(119);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
 
@@ -1790,6 +1831,7 @@ class OrderInfoServiceTest {
     @DisplayName("Passenger cancellation at 120 seconds is penalized")
     void shouldPenalizePassengerCancellationAt120Seconds() {
         givenAcceptedOrderSecondsAgo(120);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
 
@@ -1800,6 +1842,7 @@ class OrderInfoServiceTest {
     @DisplayName("Driver cancellation at 59 seconds remains free")
     void shouldAllowFreeDriverCancellationAt59Seconds() {
         givenAcceptedOrderSecondsAgo(59);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, DRIVER);
 
@@ -1810,6 +1853,7 @@ class OrderInfoServiceTest {
     @DisplayName("Driver cancellation at 60 seconds remains free")
     void shouldAllowFreeDriverCancellationAt60Seconds() {
         givenAcceptedOrderSecondsAgo(60);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, DRIVER);
 
@@ -1820,6 +1864,7 @@ class OrderInfoServiceTest {
     @DisplayName("Driver cancellation at 119 seconds remains free")
     void shouldAllowFreeDriverCancellationAt119Seconds() {
         givenAcceptedOrderSecondsAgo(119);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, DRIVER);
 
@@ -1830,6 +1875,7 @@ class OrderInfoServiceTest {
     @DisplayName("Driver cancellation at 120 seconds is penalized")
     void shouldPenalizeDriverCancellationAt120Seconds() {
         givenAcceptedOrderSecondsAgo(120);
+        givenCancellationUpdateSucceeds();
 
         ResponseResult result = orderInfoService.cancel(ORDER_ID, DRIVER);
 
@@ -1839,16 +1885,14 @@ class OrderInfoServiceTest {
     // ======================== Verify database interaction ========================
 
     @Test
-    @DisplayName("Successful cancellation persists changes to database")
-    void should_callUpdateById_when_cancellationSucceeds() {
+    @DisplayName("Successful cancellation uses predecessor-state CAS")
+    void shouldUseSnapshotStatusCas_whenCancellationSucceeds() {
         givenOrderWithStatus(OrderConstant.ORDER_START);
+        givenCancellationUpdateSucceeds();
 
-        orderInfoService.cancel(ORDER_ID, PASSENGER);
+        ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
 
-        // verify() is another Mockito tool:
-        // "confirm that updateById was called exactly once with our orderInfo"
-        // This ensures the code actually saves the cancellation to the database.
-        verify(orderInfoMapper, times(1)).updateById(orderInfo);
+        assertSuccessfulCancellation(result, OrderConstant.CANCEL_PASSENGER_BEFORE, PASSENGER);
     }
 
     @Test
@@ -1860,6 +1904,81 @@ class OrderInfoServiceTest {
 
         // verify with never(): "updateById should NOT have been called"
         verify(orderInfoMapper, never()).updateById(any());
+        verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
+    }
+
+    @Test
+    @DisplayName("Passenger cancellation returns order-not-found without writes")
+    void shouldReturnOrderNotFound_whenCancellingMissingOrder() {
+        when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(null);
+
+        ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
+
+        assertEquals(CommonStatus.ORDER_NOT_FOUND.getCode(), result.getCode());
+        assertEquals(CommonStatus.ORDER_NOT_FOUND.getMessage(), result.getMessage());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
+        assertNoRemoteInteractions();
+    }
+
+    @Test
+    @DisplayName("Cancellation CAS miss returns finalization-in-progress after pending reread")
+    void shouldReturnFinalizationInProgress_whenCancellationCasLosesToPendingFinalization() {
+        ReflectionTestUtils.setField(orderInfoService, "clock", Clock.fixed(CANCELLATION_NOW, TEST_ZONE));
+        OrderInfo initialOrder = orderWithStatus(OrderConstant.DRIVER_ARRIVED_DEPARTURE);
+        OrderInfo latestOrder = orderWithStatus(OrderConstant.FINALIZATION_PENDING);
+        when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(initialOrder, latestOrder);
+        givenCancellationUpdateLoses();
+
+        ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
+
+        assertEquals(FINALIZATION_IN_PROGRESS_CODE, result.getCode());
+        assertEquals(FINALIZATION_IN_PROGRESS_MESSAGE, result.getMessage());
+        UpdateWrapper<OrderInfo> updateWrapper = captureSingleLegacyUpdate();
+        assertCancellationUpdate(updateWrapper, OrderConstant.DRIVER_ARRIVED_DEPARTURE,
+                OrderConstant.CANCEL_PASSENGER_ILLEGAL, PASSENGER);
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        assertNoRemoteInteractions();
+    }
+
+    @Test
+    @DisplayName("Cancellation CAS miss returns finalization-in-progress after failed reread")
+    void shouldReturnFinalizationInProgress_whenCancellationCasLosesToFailedFinalization() {
+        ReflectionTestUtils.setField(orderInfoService, "clock", Clock.fixed(CANCELLATION_NOW, TEST_ZONE));
+        OrderInfo initialOrder = orderWithStatus(OrderConstant.DRIVER_ARRIVED_DEPARTURE);
+        OrderInfo latestOrder = orderWithStatus(OrderConstant.FINALIZATION_FAILED);
+        when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(initialOrder, latestOrder);
+        givenCancellationUpdateLoses();
+
+        ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
+
+        assertEquals(FINALIZATION_IN_PROGRESS_CODE, result.getCode());
+        assertEquals(FINALIZATION_IN_PROGRESS_MESSAGE, result.getMessage());
+        UpdateWrapper<OrderInfo> updateWrapper = captureSingleLegacyUpdate();
+        assertCancellationUpdate(updateWrapper, OrderConstant.DRIVER_ARRIVED_DEPARTURE,
+                OrderConstant.CANCEL_PASSENGER_ILLEGAL, PASSENGER);
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        assertNoRemoteInteractions();
+    }
+
+    @Test
+    @DisplayName("Cancellation CAS miss keeps existing ordinary failure semantics")
+    void shouldReturnCancelError_whenCancellationCasLosesToNonFinalizationState() {
+        ReflectionTestUtils.setField(orderInfoService, "clock", Clock.fixed(CANCELLATION_NOW, TEST_ZONE));
+        OrderInfo initialOrder = orderWithStatus(OrderConstant.DRIVER_ARRIVED_DEPARTURE);
+        OrderInfo latestOrder = orderWithStatus(OrderConstant.PICK_UP_PASSENGER);
+        when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(initialOrder, latestOrder);
+        givenCancellationUpdateLoses();
+
+        ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
+
+        assertEquals(CommonStatus.ORDER_CANCEL_ERROR.getCode(), result.getCode());
+        assertEquals(CommonStatus.ORDER_CANCEL_ERROR.getMessage(), result.getMessage());
+        UpdateWrapper<OrderInfo> updateWrapper = captureSingleLegacyUpdate();
+        assertCancellationUpdate(updateWrapper, OrderConstant.DRIVER_ARRIVED_DEPARTURE,
+                OrderConstant.CANCEL_PASSENGER_ILLEGAL, PASSENGER);
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        assertNoRemoteInteractions();
     }
 
     // ======================== Dispatch lock safety ========================

@@ -1366,13 +1366,31 @@ public class OrderInfoService {
             return ResponseResult.fail(CommonStatus.ORDER_CANCEL_ERROR.getCode(), CommonStatus.ORDER_CANCEL_ERROR.getMessage());
         }
 
-        orderInfo.setCancelTypeCode(cancelTypeCode);
-        orderInfo.setCancelTime(cancelTime);
-        orderInfo.setCancelOperator(Integer.parseInt(identity));
-        orderInfo.setOrderStatus(OrderConstant.ORDER_CANCEL);
+        UpdateWrapper<OrderInfo> updateWrapper = new UpdateWrapper<>();
+        updateWrapper.eq("id", orderId)
+                .eq("order_status", orderStatus)
+                .set("cancel_type_code", cancelTypeCode)
+                .set("cancel_time", cancelTime)
+                .set("cancel_operator", Integer.parseInt(identity))
+                .set("order_status", OrderConstant.ORDER_CANCEL);
+        preserveLegacyOrderAuditTimes(updateWrapper);
 
-        orderInfoMapper.updateById(orderInfo);
-        return ResponseResult.success();
+        int updated = orderInfoMapper.update(null, updateWrapper);
+        if (updated == 1) {
+            return ResponseResult.success();
+        }
+
+        OrderInfo latestOrder = orderInfoMapper.selectById(orderId);
+        if (latestOrder == null) {
+            return ResponseResult.fail(CommonStatus.ORDER_NOT_FOUND.getCode(),
+                    CommonStatus.ORDER_NOT_FOUND.getMessage());
+        }
+        if (isFinalizationOwnedStatus(latestOrder.getOrderStatus())) {
+            return ResponseResult.fail(CommonStatus.FINALIZATION_IN_PROGRESS.getCode(),
+                    CommonStatus.FINALIZATION_IN_PROGRESS.getMessage());
+        }
+        return ResponseResult.fail(CommonStatus.ORDER_CANCEL_ERROR.getCode(),
+                CommonStatus.ORDER_CANCEL_ERROR.getMessage());
     }
 
     /**

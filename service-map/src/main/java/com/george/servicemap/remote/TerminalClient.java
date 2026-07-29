@@ -148,33 +148,52 @@ public class TerminalClient {
         url.append("&");
         url.append("endtime="+endtime);
 
-        log.debug("Requesting Amap trace search for tid={}, starttime={}, endtime={}", tid, starttime, endtime);
+        log.debug("Requesting Amap trace search");
         ResponseEntity<String> forEntity = restTemplate.getForEntity(url.toString(), String.class);
-        log.debug("Amap trace search response: {}", forEntity.getBody());
 
-        JSONObject result = new JSONObject(forEntity.getBody());
-        JSONObject data = result.getJSONObject("data");
-        int counts = data.getInt("counts");
-        if (counts == 0){
-            return ResponseResult.fail(CommonStatus.MAP_TRACK_EMPTY.getCode(),
-                    CommonStatus.MAP_TRACK_EMPTY.getMessage());
+        try {
+            JSONObject result = new JSONObject(forEntity.getBody());
+            JSONObject data = result.getJSONObject("data");
+            int counts = data.getInt("counts");
+            if (counts == 0){
+                return ResponseResult.fail(CommonStatus.MAP_TRACK_EMPTY.getCode(),
+                        CommonStatus.MAP_TRACK_EMPTY.getMessage());
+            }
+            if (counts < 0) {
+                return downstreamResponseError();
+            }
+            JSONArray tracks = data.getJSONArray("tracks");
+            if (tracks.length() == 0) {
+                return ResponseResult.fail(CommonStatus.MAP_TRACK_EMPTY.getCode(),
+                        CommonStatus.MAP_TRACK_EMPTY.getMessage());
+            }
+            long driveMile = 0L;
+            long totalDurationMillis = 0L;
+            for (int i=0;i<tracks.length();i++){
+                JSONObject jsonObject = tracks.getJSONObject(i);
+
+                long distance = jsonObject.getLong("distance");
+                long time = jsonObject.getLong("time");
+                if (distance < 0 || time < 0) {
+                    return downstreamResponseError();
+                }
+                driveMile = Math.addExact(driveMile, distance);
+                totalDurationMillis = Math.addExact(totalDurationMillis, time);
+            }
+            TrsearchResponse trsearchResponse = new TrsearchResponse();
+            trsearchResponse.setDriveMile(driveMile);
+            trsearchResponse.setDriveTime(TimeUnit.MILLISECONDS.toSeconds(totalDurationMillis));
+            return ResponseResult.success(trsearchResponse);
+        } catch (Exception e) {
+            log.warn("Amap trace search response parsing failed; operation=trsearch, exceptionType={}",
+                    e.getClass().getSimpleName());
+            return downstreamResponseError();
         }
-        JSONArray tracks = data.getJSONArray("tracks");
-        long driveMile = 0L;
-        long totalDurationMillis = 0L;
-        for (int i=0;i<tracks.length();i++){
-            JSONObject jsonObject = tracks.getJSONObject(i);
 
-            long distance = jsonObject.getLong("distance");
-            driveMile = driveMile + distance;
+    }
 
-            long time = jsonObject.getLong("time");
-            totalDurationMillis = totalDurationMillis + time;
-        }
-        TrsearchResponse trsearchResponse = new TrsearchResponse();
-        trsearchResponse.setDriveMile(driveMile);
-        trsearchResponse.setDriveTime(TimeUnit.MILLISECONDS.toSeconds(totalDurationMillis));
-        return ResponseResult.success(trsearchResponse);
-
+    private ResponseResult<TrsearchResponse> downstreamResponseError() {
+        return ResponseResult.fail(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(),
+                CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage());
     }
 }

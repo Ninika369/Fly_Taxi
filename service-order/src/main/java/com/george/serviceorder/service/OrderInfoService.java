@@ -46,6 +46,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * This class is to provide service for controller to deal with orders
@@ -56,6 +57,8 @@ public class OrderInfoService {
 
     private static final int MAX_DISPATCH_ATTEMPTS = 6;
     private static final int FINALIZATION_RETRY_BATCH_SIZE = 50;
+    private static final String PRESERVE_GMT_CREATE_SQL = "gmt_create = gmt_create";
+    private static final String PRESERVE_GMT_MODIFIED_SQL = "gmt_modified = gmt_modified";
     private long dispatchRetryDelayMs = TimeUnit.SECONDS.toMillis(20);
     private Clock clock = Clock.systemDefaultZone();
 
@@ -537,19 +540,15 @@ public class OrderInfoService {
         String toPickUpPassengerLongitude = orderRequest.getToPickUpPassengerLongitude();
         String toPickUpPassengerLatitude = orderRequest.getToPickUpPassengerLatitude();
         String toPickUpPassengerAddress = orderRequest.getToPickUpPassengerAddress();
-        QueryWrapper<OrderInfo> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("id",orderId);
-        OrderInfo orderInfo = orderInfoMapper.selectOne(queryWrapper);
-
-        orderInfo.setToPickUpPassengerAddress(toPickUpPassengerAddress);
-        orderInfo.setToPickUpPassengerLatitude(toPickUpPassengerLatitude);
-        orderInfo.setToPickUpPassengerLongitude(toPickUpPassengerLongitude);
-        orderInfo.setToPickUpPassengerTime(LocalDateTime.now());
-        orderInfo.setOrderStatus(OrderConstant.DRIVER_TO_PICK_UP_PASSENGER);
-
-        orderInfoMapper.updateById(orderInfo);
-
-        return ResponseResult.success();
+        return transitionLegacyOrderState(
+                orderId,
+                OrderConstant.DRIVER_RECEIVE_ORDER,
+                OrderConstant.DRIVER_TO_PICK_UP_PASSENGER,
+                updateWrapper -> updateWrapper
+                        .set("to_pick_up_passenger_address", toPickUpPassengerAddress)
+                        .set("to_pick_up_passenger_latitude", toPickUpPassengerLatitude)
+                        .set("to_pick_up_passenger_longitude", toPickUpPassengerLongitude)
+                        .set("to_pick_up_passenger_time", LocalDateTime.now(clock)));
 
     }
 
@@ -561,16 +560,12 @@ public class OrderInfoService {
      */
     public ResponseResult arrivedDeparture(OrderRequest orderRequest){
         Long orderId = orderRequest.getOrderId();
-
-        QueryWrapper<OrderInfo> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("id",orderId);
-
-        OrderInfo orderInfo = orderInfoMapper.selectOne(queryWrapper);
-        orderInfo.setOrderStatus(OrderConstant.DRIVER_ARRIVED_DEPARTURE);
-
-        orderInfo.setDriverArrivedDepartureTime(LocalDateTime.now());
-        orderInfoMapper.updateById(orderInfo);
-        return ResponseResult.success();
+        return transitionLegacyOrderState(
+                orderId,
+                OrderConstant.DRIVER_TO_PICK_UP_PASSENGER,
+                OrderConstant.DRIVER_ARRIVED_DEPARTURE,
+                updateWrapper -> updateWrapper
+                        .set("driver_arrived_departure_time", LocalDateTime.now(clock)));
     }
 
 
@@ -581,18 +576,14 @@ public class OrderInfoService {
      */
     public ResponseResult pickUpPassenger(@RequestBody OrderRequest orderRequest){
         Long orderId = orderRequest.getOrderId();
-
-        QueryWrapper<OrderInfo> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("id",orderId);
-        OrderInfo orderInfo = orderInfoMapper.selectOne(queryWrapper);
-
-        orderInfo.setPickUpPassengerLongitude(orderRequest.getPickUpPassengerLongitude());
-        orderInfo.setPickUpPassengerLatitude(orderRequest.getPickUpPassengerLatitude());
-        orderInfo.setPickUpPassengerTime(LocalDateTime.now());
-        orderInfo.setOrderStatus(OrderConstant.PICK_UP_PASSENGER);
-
-        orderInfoMapper.updateById(orderInfo);
-        return ResponseResult.success();
+        return transitionLegacyOrderState(
+                orderId,
+                OrderConstant.DRIVER_ARRIVED_DEPARTURE,
+                OrderConstant.PICK_UP_PASSENGER,
+                updateWrapper -> updateWrapper
+                        .set("pick_up_passenger_longitude", orderRequest.getPickUpPassengerLongitude())
+                        .set("pick_up_passenger_latitude", orderRequest.getPickUpPassengerLatitude())
+                        .set("pick_up_passenger_time", LocalDateTime.now(clock)));
     }
 
     /**
@@ -692,6 +683,7 @@ public class OrderInfoService {
                         CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getCode(),
                         CommonStatus.FINALIZATION_RECOVERY_SCHEDULED.getMessage())))
                 .set("gmt_modified", now);
+        preserveOrderCreationTime(updateWrapper);
 
         int updated = orderInfoMapper.update(null, updateWrapper);
         if (updated == 0) {
@@ -777,6 +769,7 @@ public class OrderInfoService {
                     .set("passenger_getoff_latitude", passengerGetoffLatitude)
                     .set("finalization_trace_end_epoch_ms", traceEndEpochMs);
         }
+        preserveOrderCreationTime(updateWrapper);
 
         int claimed = orderInfoMapper.update(null, updateWrapper);
         if (claimed == 0) {
@@ -838,13 +831,15 @@ public class OrderInfoService {
         TrsearchResponse data = trsearch.getData();
         Long driveMile = data.getDriveMile();
         Long driveDurationSeconds = data.getDriveTime();
+        int pricingDistance = Math.toIntExact(driveMile);
+        int pricingDuration = Math.toIntExact(driveDurationSeconds);
 
         // get the actual price
         String address = orderInfo.getAddress();
         String vehicleType = orderInfo.getVehicleType();
         ResponseResult<Double> doubleResponseResult;
         try {
-            doubleResponseResult = finalizationPriceClient.calculatePrice(driveMile.intValue(), driveDurationSeconds.intValue(), address, vehicleType);
+            doubleResponseResult = finalizationPriceClient.calculatePrice(pricingDistance, pricingDuration, address, vehicleType);
         } catch (RuntimeException e) {
             logFinalizationDependencyException(orderInfo.getId(), attempt, "calculatePrice", e);
             return handleFinalizationFailure(orderInfo, attempt, downstreamResponseError());
@@ -921,6 +916,7 @@ public class OrderInfoService {
                         CommonStatus.FINALIZATION_FAILED.getCode(),
                         CommonStatus.FINALIZATION_FAILED.getMessage())))
                 .set("gmt_modified", now);
+        preserveOrderCreationTime(updateWrapper);
 
         int updated = orderInfoMapper.update(null, updateWrapper);
         if (updated == 0) {
@@ -936,6 +932,7 @@ public class OrderInfoService {
         updateWrapper.eq("id", orderInfo.getId())
                 .eq("order_status", OrderConstant.FINALIZATION_PENDING)
                 .eq("finalization_attempts", attempt);
+        preserveOrderCreationTime(updateWrapper);
         return updateWrapper;
     }
 
@@ -1001,6 +998,11 @@ public class OrderInfoService {
 
     private boolean isOrderStatus(Integer actualStatus, int expectedStatus) {
         return actualStatus != null && actualStatus == expectedStatus;
+    }
+
+    private boolean isFinalizationOwnedStatus(Integer orderStatus) {
+        return isOrderStatus(orderStatus, OrderConstant.FINALIZATION_PENDING)
+                || isOrderStatus(orderStatus, OrderConstant.FINALIZATION_FAILED);
     }
 
     private boolean isFinalizationDue(OrderInfo orderInfo, LocalDateTime now) {
@@ -1135,6 +1137,18 @@ public class OrderInfoService {
         if (data.getDriveMile() == null || data.getDriveTime() == null) {
             return downstreamResponseError();
         }
+        Long driveMile = data.getDriveMile();
+        Long driveTime = data.getDriveTime();
+        if (driveMile < 0 || driveTime < 0) {
+            return downstreamResponseError();
+        }
+        if (driveMile > Integer.MAX_VALUE || driveTime > Integer.MAX_VALUE) {
+            return downstreamResponseError();
+        }
+        if (driveMile == 0L && driveTime == 0L) {
+            return ResponseResult.fail(CommonStatus.MAP_TRACK_EMPTY.getCode(),
+                    CommonStatus.MAP_TRACK_EMPTY.getMessage());
+        }
         return null;
     }
 
@@ -1146,7 +1160,7 @@ public class OrderInfoService {
             return ResponseResult.fail(priceResponse.getCode(), priceResponse.getMessage());
         }
         Double price = priceResponse.getData();
-        if (price == null || price.isNaN() || price.isInfinite()) {
+        if (price == null || price.isNaN() || price.isInfinite() || price < 0) {
             return downstreamResponseError();
         }
         return null;
@@ -1191,6 +1205,67 @@ public class OrderInfoService {
         return null;
     }
 
+    private ResponseResult transitionLegacyOrderState(
+            Long orderId,
+            int expectedStatus,
+            int targetStatus,
+            Consumer<UpdateWrapper<OrderInfo>> updateCustomizer) {
+
+        OrderInfo currentOrder = orderInfoMapper.selectById(orderId);
+        ResponseResult preflight = resolveLegacyTransitionRead(currentOrder, expectedStatus, targetStatus);
+        if (preflight != null) {
+            return preflight;
+        }
+
+        UpdateWrapper<OrderInfo> updateWrapper = new UpdateWrapper<>();
+        updateWrapper.eq("id", orderId)
+                .eq("order_status", expectedStatus)
+                .set("order_status", targetStatus);
+        updateCustomizer.accept(updateWrapper);
+        preserveLegacyOrderAuditTimes(updateWrapper);
+
+        int updated = orderInfoMapper.update(null, updateWrapper);
+        if (updated == 1) {
+            return ResponseResult.success();
+        }
+        OrderInfo latestOrder = orderInfoMapper.selectById(orderId);
+        ResponseResult rereadResult = resolveLegacyTransitionRead(latestOrder, expectedStatus, targetStatus);
+        if (rereadResult != null) {
+            return rereadResult;
+        }
+        return ResponseResult.fail(CommonStatus.ORDER_STATE_TRANSITION_NOT_ALLOWED.getCode(),
+                CommonStatus.ORDER_STATE_TRANSITION_NOT_ALLOWED.getMessage());
+    }
+
+    private ResponseResult resolveLegacyTransitionRead(OrderInfo orderInfo, int expectedStatus, int targetStatus) {
+        if (orderInfo == null) {
+            return ResponseResult.fail(CommonStatus.ORDER_NOT_FOUND.getCode(),
+                    CommonStatus.ORDER_NOT_FOUND.getMessage());
+        }
+        Integer currentStatus = orderInfo.getOrderStatus();
+        if (isOrderStatus(currentStatus, targetStatus)) {
+            return ResponseResult.success();
+        }
+        if (isFinalizationOwnedStatus(currentStatus)) {
+            return ResponseResult.fail(CommonStatus.FINALIZATION_IN_PROGRESS.getCode(),
+                    CommonStatus.FINALIZATION_IN_PROGRESS.getMessage());
+        }
+        if (!isOrderStatus(currentStatus, expectedStatus)) {
+            return ResponseResult.fail(CommonStatus.ORDER_STATE_TRANSITION_NOT_ALLOWED.getCode(),
+                    CommonStatus.ORDER_STATE_TRANSITION_NOT_ALLOWED.getMessage());
+        }
+        return null;
+    }
+
+    private void preserveOrderCreationTime(UpdateWrapper<OrderInfo> updateWrapper) {
+        updateWrapper.setSql(PRESERVE_GMT_CREATE_SQL);
+    }
+
+    private void preserveLegacyOrderAuditTimes(UpdateWrapper<OrderInfo> updateWrapper) {
+        updateWrapper.setSql(PRESERVE_GMT_CREATE_SQL);
+        updateWrapper.setSql(PRESERVE_GMT_MODIFIED_SQL);
+    }
+
     /**
      * This method is used to process the status of a passenger when they pay for an order
      * @param orderRequest
@@ -1199,11 +1274,12 @@ public class OrderInfoService {
     public ResponseResult pay(OrderRequest orderRequest){
 
         Long orderId = orderRequest.getOrderId();
-        OrderInfo orderInfo = orderInfoMapper.selectById(orderId);
-
-        orderInfo.setOrderStatus(OrderConstant.SUCCESS_PAY);
-        orderInfoMapper.updateById(orderInfo);
-        return ResponseResult.success();
+        return transitionLegacyOrderState(
+                orderId,
+                OrderConstant.TO_START_PAY,
+                OrderConstant.SUCCESS_PAY,
+                updateWrapper -> {
+                });
     }
 
     /**
@@ -1215,7 +1291,15 @@ public class OrderInfoService {
     public ResponseResult cancel(Long orderId, String identity){
         // Query the current status of the order
         OrderInfo orderInfo = orderInfoMapper.selectById(orderId);
+        if (orderInfo == null) {
+            return ResponseResult.fail(CommonStatus.ORDER_NOT_FOUND.getCode(),
+                    CommonStatus.ORDER_NOT_FOUND.getMessage());
+        }
         Integer orderStatus = orderInfo.getOrderStatus();
+        if (isFinalizationOwnedStatus(orderStatus)) {
+            return ResponseResult.fail(CommonStatus.FINALIZATION_IN_PROGRESS.getCode(),
+                    CommonStatus.FINALIZATION_IN_PROGRESS.getMessage());
+        }
 
         LocalDateTime cancelTime = LocalDateTime.now(clock);
         Integer cancelOperator = null;
@@ -1299,11 +1383,12 @@ public class OrderInfoService {
     public ResponseResult pushPayInfo(OrderRequest orderRequest) {
 
         Long orderId = orderRequest.getOrderId();
-
-        OrderInfo orderInfo = orderInfoMapper.selectById(orderId);
-        orderInfo.setOrderStatus(OrderConstant.TO_START_PAY);
-        orderInfoMapper.updateById(orderInfo);
-        return ResponseResult.success();
+        return transitionLegacyOrderState(
+                orderId,
+                OrderConstant.PASSENGER_GETOFF,
+                OrderConstant.TO_START_PAY,
+                updateWrapper -> {
+                });
 
     }
 

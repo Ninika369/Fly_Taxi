@@ -52,6 +52,40 @@ Status 11 continues to block new passenger orders until controlled recovery move
 
 A future administrator endpoint may call this internal method only after ADMIN identity, RBAC, and audit logging exist. This ADR does not authorize an anonymous management endpoint.
 
+### Finalization state ownership and legacy writers
+
+Statuses 10 (`FINALIZATION_PENDING`) and 11 (`FINALIZATION_FAILED`) are owned by the finalization state machine. Legacy lifecycle and payment writers must not overwrite those states.
+
+The legacy lifecycle and payment writers use exact predecessor-state compare-and-set transitions:
+
+- `toPickUpPassenger`: 2 -> 3;
+- `arrivedDeparture`: 3 -> 4;
+- `pickUpPassenger`: 4 -> 5;
+- `pushPayInfo`: 6 -> 7;
+- `pay`: 7 -> 8.
+
+If a legacy writer loses its CAS, it rereads the order and returns a stable domain result:
+
+- missing order: 1607;
+- already at the target state: success;
+- status 10 or 11: 1611;
+- any other state: 1610.
+
+`cancel()` has an explicit negative fence for statuses 10 and 11 and returns 1611 without writing. Other cancellation legality rules remain unchanged and are deferred to Batch B lifecycle and authorization governance.
+
+`ORDER_FINALIZATION_NOT_ALLOWED` (1608) remains reserved for callers that enter the finalization path when the current order state is not eligible for finalization. Legacy lifecycle, payment, and cancellation writers use `ORDER_STATE_TRANSITION_NOT_ALLOWED` (1610) or `FINALIZATION_IN_PROGRESS` (1611) instead.
+
+The following `OrderInfo` fields are internal recovery metadata and are excluded from ordinary JSON serialization with field-level `@JsonIgnore`:
+
+- `finalizationAttempts`;
+- `finalizationNextRetryAt`;
+- `finalizationLastError`;
+- `finalizationTraceEndEpochMs`.
+
+Before adding the JSON exclusion, the repository was checked for `ResponseResult<OrderInfo>` exits and controller/remote `OrderInfo` references. The only `ResponseResult<OrderInfo>` service return is the client-facing current-order path; no internal JSON consumer was found that depends on these four fields.
+
+The audited MySQL 8.0.30 schema currently defines both `order_info.gmt_create` and `order_info.gmt_modified` with `ON UPDATE CURRENT_TIMESTAMP`. A wrapper update that omits those columns can therefore change their stored values as a side effect. Every wrapper-based order transition explicitly preserves `gmt_create` with `gmt_create = gmt_create`. Legacy lifecycle and payment CAS transitions also self-assign `gmt_modified` to preserve the pre-patch audit-time behavior, while A6 finalization transitions continue to write their deliberate `gmt_modified` event time. This is tactical containment for the audited schema, not a claim that DB-07B physical DDL correction is complete.
+
 ### Dedicated finalization remote deadline
 
 `service-order` finalization calls use dedicated OpenFeign clients with the same service names as the shared clients but unique `contextId` values:
@@ -139,7 +173,9 @@ This ADR does not:
 
 - expose a controller or HTTP endpoint for recovery;
 - add ADMIN identity, RBAC, audit logging, or `api-boss` recovery UI;
+- implement full principal, role, or object-ownership enforcement;
 - change shared Feign client timeout behavior for add or dispatch;
+- implement durable notification outbox or guaranteed downstream delivery;
 - execute READ-02, ORDER-04, or any database script;
 - rename the `drive_time` physical column;
 - claim true historical ride-duration seconds can be recovered;

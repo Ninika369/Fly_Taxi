@@ -1,5 +1,6 @@
 package com.george.internalCommon.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 import java.io.Serializable;
@@ -223,21 +224,25 @@ public class OrderInfo implements Serializable {
     /**
      * Number of claimed finalization attempts.
      */
+    @JsonIgnore
     private Integer finalizationAttempts;
 
     /**
      * Next retry time for pending finalization, or the crash-recovery lease while an attempt is running.
      */
+    @JsonIgnore
     private LocalDateTime finalizationNextRetryAt;
 
     /**
      * Stable finalization error code and domain message.
      */
+    @JsonIgnore
     private String finalizationLastError;
 
     /**
      * Fixed trace-search end instant captured when passenger get-off is first accepted.
      */
+    @JsonIgnore
     private Long finalizationTraceEndEpochMs;
 
     /**

@@ -121,8 +121,30 @@ class OrderInfoServiceTest {
     private static final Instant FIXED_TRACE_END = Instant.parse("2026-07-28T01:02:03Z");
     private static final Instant CANCELLATION_NOW = Instant.parse("2026-07-28T01:02:03Z");
     private static final ZoneId TEST_ZONE = ZoneId.of("Pacific/Auckland");
+    private static final int FINALIZATION_IN_PROGRESS_CODE = 1611;
+    private static final String FINALIZATION_IN_PROGRESS_MESSAGE =
+            "Order is being finalized and cannot be modified";
 
     private OrderInfo orderInfo;
+
+    private interface LegacyTransitionInvocation {
+        ResponseResult invoke(OrderRequest orderRequest);
+    }
+
+    private static class LegacyTransitionCase {
+        private final String name;
+        private final int predecessorStatus;
+        private final int targetStatus;
+        private final LegacyTransitionInvocation invocation;
+
+        private LegacyTransitionCase(String name, int predecessorStatus, int targetStatus,
+                                     LegacyTransitionInvocation invocation) {
+            this.name = name;
+            this.predecessorStatus = predecessorStatus;
+            this.targetStatus = targetStatus;
+            this.invocation = invocation;
+        }
+    }
 
     @BeforeEach
     void setUp() {
@@ -220,6 +242,17 @@ class OrderInfoServiceTest {
         return orderRequest;
     }
 
+    private OrderRequest legacyTransitionRequest() {
+        OrderRequest orderRequest = new OrderRequest();
+        orderRequest.setOrderId(ORDER_ID);
+        orderRequest.setToPickUpPassengerLongitude("174.7700");
+        orderRequest.setToPickUpPassengerLatitude("-36.8500");
+        orderRequest.setToPickUpPassengerAddress("Pickup point");
+        orderRequest.setPickUpPassengerLongitude("174.7710");
+        orderRequest.setPickUpPassengerLatitude("-36.8510");
+        return orderRequest;
+    }
+
     private void givenFinalizableOrder(Long carId) {
         orderInfo.setOrderStatus(OrderConstant.PICK_UP_PASSENGER);
         orderInfo.setCarId(carId);
@@ -306,6 +339,29 @@ class OrderInfoServiceTest {
         assertFalse(sqlSet.contains(columnName), sqlSet);
     }
 
+    private void assertSqlSetContainsSelfAssignment(UpdateWrapper<OrderInfo> updateWrapper, String columnName) {
+        String normalizedSqlSet = normalizedSqlSegment(updateWrapper.getSqlSet());
+        String normalizedColumn = columnName.toUpperCase(Locale.ROOT);
+        assertTrue(Pattern.compile("(^|,\\s*)" + normalizedColumn + "\\s*=\\s*"
+                        + normalizedColumn + "(\\s*,|$)")
+                .matcher(normalizedSqlSet).find(), normalizedSqlSet);
+    }
+
+    private void assertSqlSetDoesNotContainSelfAssignment(UpdateWrapper<OrderInfo> updateWrapper,
+                                                          String columnName) {
+        String normalizedSqlSet = normalizedSqlSegment(updateWrapper.getSqlSet());
+        String normalizedColumn = columnName.toUpperCase(Locale.ROOT);
+        assertFalse(Pattern.compile("(^|,\\s*)" + normalizedColumn + "\\s*=\\s*"
+                        + normalizedColumn + "(\\s*,|$)")
+                .matcher(normalizedSqlSet).find(), normalizedSqlSet);
+    }
+
+    private void assertFinalizationWrapperPreservesCreationTime(UpdateWrapper<OrderInfo> updateWrapper) {
+        assertSqlSetContainsSelfAssignment(updateWrapper, "gmt_create");
+        assertSqlSetContains(updateWrapper, "gmt_modified");
+        assertSqlSetDoesNotContainSelfAssignment(updateWrapper, "gmt_modified");
+    }
+
     private String normalizedSqlSegment(String sqlSegment) {
         return sqlSegment
                 .replace("`", "")
@@ -328,6 +384,59 @@ class OrderInfoServiceTest {
         assertTrue(updateWrapper.getParamNameValuePairs().containsValue(expectedValue),
                 "Expected wrapper to contain value " + expectedValue
                         + " but found " + updateWrapper.getParamNameValuePairs());
+    }
+
+    private List<LegacyTransitionCase> legacyTransitionCases() {
+        return Arrays.asList(
+                new LegacyTransitionCase(
+                        "toPickUpPassenger",
+                        OrderConstant.DRIVER_RECEIVE_ORDER,
+                        OrderConstant.DRIVER_TO_PICK_UP_PASSENGER,
+                        orderInfoService::toPickUpPassenger),
+                new LegacyTransitionCase(
+                        "arrivedDeparture",
+                        OrderConstant.DRIVER_TO_PICK_UP_PASSENGER,
+                        OrderConstant.DRIVER_ARRIVED_DEPARTURE,
+                        orderInfoService::arrivedDeparture),
+                new LegacyTransitionCase(
+                        "pickUpPassenger",
+                        OrderConstant.DRIVER_ARRIVED_DEPARTURE,
+                        OrderConstant.PICK_UP_PASSENGER,
+                        orderInfoService::pickUpPassenger),
+                new LegacyTransitionCase(
+                        "pushPayInfo",
+                        OrderConstant.PASSENGER_GETOFF,
+                        OrderConstant.TO_START_PAY,
+                        orderInfoService::pushPayInfo),
+                new LegacyTransitionCase(
+                        "pay",
+                        OrderConstant.TO_START_PAY,
+                        OrderConstant.SUCCESS_PAY,
+                        orderInfoService::pay)
+        );
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private UpdateWrapper<OrderInfo> captureSingleLegacyUpdate() {
+        ArgumentCaptor<UpdateWrapper> captor = ArgumentCaptor.forClass(UpdateWrapper.class);
+        verify(orderInfoMapper, times(1)).update(isNull(), captor.capture());
+        return captor.getValue();
+    }
+
+    private OrderInfo orderWithStatus(int status) {
+        OrderInfo order = new OrderInfo();
+        order.setId(ORDER_ID);
+        order.setOrderStatus(status);
+        order.setReceiveOrderTime(LocalDateTime.now().minusMinutes(3));
+        return order;
+    }
+
+    private void assertNoLegacyTransitionSideEffects() {
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verify(orderInfoMapper, never()).update(isNull(), any(UpdateWrapper.class));
+        verifyNoInteractions(serviceDriverUserClient, serviceMapClient, servicePriceClient,
+                serviceSsePushClient, finalizationDriverUserClient, finalizationMapClient,
+                finalizationPriceClient);
     }
 
     private String readRepositoryFile(String path) throws Exception {
@@ -391,6 +500,107 @@ class OrderInfoServiceTest {
     // ======================== Passenger get-off pricing ========================
 
     @Test
+    @DisplayName("Legacy lifecycle and payment transitions reject finalization-owned states")
+    void shouldRejectLegacyTransitions_whenOrderIsBeingFinalized() {
+        for (LegacyTransitionCase transitionCase : legacyTransitionCases()) {
+            for (int finalizationStatus : Arrays.asList(
+                    OrderConstant.FINALIZATION_PENDING,
+                    OrderConstant.FINALIZATION_FAILED)) {
+                reset(orderInfoMapper, serviceDriverUserClient, serviceMapClient, servicePriceClient,
+                        serviceSsePushClient, finalizationDriverUserClient, finalizationMapClient,
+                        finalizationPriceClient);
+                OrderInfo current = orderWithStatus(finalizationStatus);
+                when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(current);
+
+                ResponseResult result = transitionCase.invocation.invoke(legacyTransitionRequest());
+
+                assertEquals(FINALIZATION_IN_PROGRESS_CODE, result.getCode(),
+                        transitionCase.name + " should reject status " + finalizationStatus);
+                assertEquals(FINALIZATION_IN_PROGRESS_MESSAGE, result.getMessage(),
+                        transitionCase.name + " should return the stable finalization fence message");
+                assertNoLegacyTransitionSideEffects();
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Cancel rejects finalization-owned states without writing")
+    void shouldRejectCancellation_whenOrderIsBeingFinalized() {
+        for (int finalizationStatus : Arrays.asList(
+                OrderConstant.FINALIZATION_PENDING,
+                OrderConstant.FINALIZATION_FAILED)) {
+            reset(orderInfoMapper, serviceDriverUserClient, serviceMapClient, servicePriceClient,
+                    serviceSsePushClient, finalizationDriverUserClient, finalizationMapClient,
+                    finalizationPriceClient);
+            OrderInfo current = orderWithStatus(finalizationStatus);
+            when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(current);
+
+            ResponseResult result = orderInfoService.cancel(ORDER_ID, PASSENGER);
+
+            assertEquals(FINALIZATION_IN_PROGRESS_CODE, result.getCode());
+            assertEquals(FINALIZATION_IN_PROGRESS_MESSAGE, result.getMessage());
+            assertNoLegacyTransitionSideEffects();
+        }
+    }
+
+    @Test
+    @DisplayName("Legacy lifecycle and payment transitions use predecessor-state CAS")
+    void shouldUsePredecessorCas_whenLegacyTransitionSucceeds() {
+        for (LegacyTransitionCase transitionCase : legacyTransitionCases()) {
+            reset(orderInfoMapper);
+            when(orderInfoMapper.selectById(ORDER_ID)).thenReturn(orderWithStatus(transitionCase.predecessorStatus));
+            when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
+
+            ResponseResult result = transitionCase.invocation.invoke(legacyTransitionRequest());
+
+            assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode(), transitionCase.name);
+            verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+            UpdateWrapper<OrderInfo> updateWrapper = captureSingleLegacyUpdate();
+            assertTrue(updateWrapper.getSqlSegment().contains("id"), updateWrapper.getSqlSegment());
+            assertTrue(updateWrapper.getSqlSegment().contains("order_status"), updateWrapper.getSqlSegment());
+            assertWrapperContainsValue(updateWrapper, ORDER_ID);
+            assertWrapperContainsValue(updateWrapper, transitionCase.predecessorStatus);
+            assertSqlSetContains(updateWrapper, "order_status");
+            assertWrapperContainsValue(updateWrapper, transitionCase.targetStatus);
+            assertSqlSetContainsSelfAssignment(updateWrapper, "gmt_create");
+            assertSqlSetContainsSelfAssignment(updateWrapper, "gmt_modified");
+        }
+    }
+
+    @Test
+    @DisplayName("Legacy transition CAS miss is resolved from the reread state")
+    void shouldResolveLegacyTransitionCasMiss_fromRereadState() {
+        for (LegacyTransitionCase transitionCase : legacyTransitionCases()) {
+            assertLegacyCasMissResult(transitionCase, orderWithStatus(transitionCase.targetStatus),
+                    CommonStatus.SUCCESS.getCode(), CommonStatus.SUCCESS.getMessage());
+            assertLegacyCasMissResult(transitionCase, orderWithStatus(OrderConstant.FINALIZATION_PENDING),
+                    FINALIZATION_IN_PROGRESS_CODE, FINALIZATION_IN_PROGRESS_MESSAGE);
+            assertLegacyCasMissResult(transitionCase, orderWithStatus(OrderConstant.FINALIZATION_FAILED),
+                    FINALIZATION_IN_PROGRESS_CODE, FINALIZATION_IN_PROGRESS_MESSAGE);
+            assertLegacyCasMissResult(transitionCase, null,
+                    CommonStatus.ORDER_NOT_FOUND.getCode(), CommonStatus.ORDER_NOT_FOUND.getMessage());
+            assertLegacyCasMissResult(transitionCase, orderWithStatus(OrderConstant.ORDER_START),
+                    1610, "Order state transition is not allowed");
+        }
+    }
+
+    private void assertLegacyCasMissResult(LegacyTransitionCase transitionCase, OrderInfo rereadOrder,
+                                           int expectedCode, String expectedMessage) {
+        reset(orderInfoMapper);
+        when(orderInfoMapper.selectById(ORDER_ID))
+                .thenReturn(orderWithStatus(transitionCase.predecessorStatus))
+                .thenReturn(rereadOrder);
+        when(orderInfoMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(0);
+
+        ResponseResult result = transitionCase.invocation.invoke(legacyTransitionRequest());
+
+        assertEquals(expectedCode, result.getCode(), transitionCase.name);
+        assertEquals(expectedMessage, result.getMessage(), transitionCase.name);
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        verify(orderInfoMapper, times(1)).update(isNull(), any(UpdateWrapper.class));
+    }
+
+    @Test
     @DisplayName("Passenger get-off forwards ride duration in seconds to pricing")
     void shouldForwardDriveDurationInSeconds_whenPassengerGetsOff() {
         Long carId = 300L;
@@ -408,7 +618,11 @@ class OrderInfoServiceTest {
         assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
         verify(finalizationPriceClient, times(1)).calculatePrice(5000, 600, "110000", "1");
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
-        UpdateWrapper<OrderInfo> successUpdate = captureTerminalFinalizationUpdate();
+        List<UpdateWrapper<OrderInfo>> updates = captureFinalizationUpdates(2);
+        UpdateWrapper<OrderInfo> claimUpdate = updates.get(0);
+        UpdateWrapper<OrderInfo> successUpdate = updates.get(1);
+        assertFinalizationWrapperPreservesCreationTime(claimUpdate);
+        assertFinalizationWrapperPreservesCreationTime(successUpdate);
         assertTerminalCas(successUpdate, 1);
         assertSqlSetContains(successUpdate, "order_status");
         assertSqlSetContains(successUpdate, "drive_mile");
@@ -488,6 +702,7 @@ class OrderInfoServiceTest {
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
         UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
         assertTerminalCas(pendingUpdate, 1);
+        assertFinalizationWrapperPreservesCreationTime(pendingUpdate);
         assertSqlSetContains(pendingUpdate, "order_status");
         assertSqlSetContains(pendingUpdate, "finalization_next_retry_at");
         assertSqlSetContains(pendingUpdate, "finalization_last_error");
@@ -524,6 +739,157 @@ class OrderInfoServiceTest {
         assertSqlSetDoesNotContain(pendingUpdate, "price");
         assertTrue(pendingUpdate.getParamNameValuePairs().containsValue(
                 "1700:Downstream service returned an invalid response"));
+    }
+
+    @Test
+    @DisplayName("Passenger get-off rejects negative track distance without pricing")
+    void shouldPersistDownstreamResponseError_whenTrackDistanceIsNegative() {
+        Long carId = 300L;
+        OrderRequest orderRequest = getoffRequest();
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
+        givenTrackLookupSucceeds("tid-300", -1L, 600L);
+
+        ResponseResult result = orderInfoService.passengerGetoff(orderRequest);
+
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
+        verify(finalizationPriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        assertWrapperContainsValue(pendingUpdate, "1700:Downstream service returned an invalid response");
+    }
+
+    @Test
+    @DisplayName("Passenger get-off rejects negative track duration without pricing")
+    void shouldPersistDownstreamResponseError_whenTrackDurationIsNegative() {
+        Long carId = 300L;
+        OrderRequest orderRequest = getoffRequest();
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
+        givenTrackLookupSucceeds("tid-300", 5000L, -1L);
+
+        ResponseResult result = orderInfoService.passengerGetoff(orderRequest);
+
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
+        verify(finalizationPriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        assertWrapperContainsValue(pendingUpdate, "1700:Downstream service returned an invalid response");
+    }
+
+    @Test
+    @DisplayName("Passenger get-off rejects track values outside pricing integer range")
+    void shouldPersistDownstreamResponseError_whenTrackValuesExceedIntegerRange() {
+        Long carId = 300L;
+        OrderRequest orderRequest = getoffRequest();
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
+        givenTrackLookupSucceeds("tid-300", (long) Integer.MAX_VALUE + 1L, 600L);
+
+        ResponseResult result = orderInfoService.passengerGetoff(orderRequest);
+
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
+        verify(finalizationPriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        assertWrapperContainsValue(pendingUpdate, "1700:Downstream service returned an invalid response");
+    }
+
+    @Test
+    @DisplayName("Passenger get-off rejects track duration outside pricing integer range")
+    void shouldPersistDownstreamResponseError_whenTrackDurationExceedsIntegerRange() {
+        Long carId = 300L;
+        OrderRequest orderRequest = getoffRequest();
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
+        givenTrackLookupSucceeds("tid-300", 5000L, (long) Integer.MAX_VALUE + 1L);
+
+        ResponseResult result = orderInfoService.passengerGetoff(orderRequest);
+
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
+        verify(finalizationPriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        assertTerminalCas(pendingUpdate, 1);
+        assertFinalizationWrapperPreservesCreationTime(pendingUpdate);
+        assertSqlSetDoesNotContain(pendingUpdate, "drive_mile");
+        assertSqlSetDoesNotContain(pendingUpdate, "drive_time");
+        assertSqlSetDoesNotContain(pendingUpdate, "price");
+        assertWrapperContainsValue(pendingUpdate, "1700:Downstream service returned an invalid response");
+    }
+
+    @Test
+    @DisplayName("Passenger get-off treats zero track distance and duration as empty track")
+    void shouldPersistTrackEmptyFailure_whenTrackDistanceAndDurationAreZero() {
+        Long carId = 300L;
+        OrderRequest orderRequest = getoffRequest();
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
+        givenTrackLookupSucceeds("tid-300", 0L, 0L);
+
+        ResponseResult result = orderInfoService.passengerGetoff(orderRequest);
+
+        assertEquals(CommonStatus.MAP_TRACK_EMPTY.getCode(), result.getCode());
+        assertEquals(CommonStatus.MAP_TRACK_EMPTY.getMessage(), result.getMessage());
+        verify(finalizationPriceClient, never()).calculatePrice(anyInt(), anyInt(), anyString(), anyString());
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        assertWrapperContainsValue(pendingUpdate, "1402:No track data is available for the requested interval");
+    }
+
+    @Test
+    @DisplayName("Passenger get-off rejects negative calculated price")
+    void shouldPersistDownstreamResponseError_whenCalculatedPriceIsNegative() {
+        Long carId = 300L;
+        OrderRequest orderRequest = getoffRequest();
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
+        givenTrackLookupSucceeds("tid-300", 5000L, 600L);
+        when(finalizationPriceClient.calculatePrice(5000, 600, "110000", "1"))
+                .thenReturn(ResponseResult.success(-0.01));
+
+        ResponseResult result = orderInfoService.passengerGetoff(orderRequest);
+
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getCode(), result.getCode());
+        assertEquals(CommonStatus.DOWNSTREAM_RESPONSE_ERROR.getMessage(), result.getMessage());
+        verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
+        UpdateWrapper<OrderInfo> pendingUpdate = captureTerminalFinalizationUpdate();
+        assertSqlSetDoesNotContain(pendingUpdate, "price");
+        assertWrapperContainsValue(pendingUpdate, "1700:Downstream service returned an invalid response");
+    }
+
+    @Test
+    @DisplayName("Passenger get-off safely passes maximum integer track values to pricing")
+    void shouldPassMaximumIntegerTrackValuesToPricing_whenTrackValuesAreInRange() {
+        Long carId = 300L;
+        OrderRequest orderRequest = getoffRequest();
+        givenFinalizationClock();
+        givenFinalizableOrder(carId);
+        givenFinalizationClaimSucceeds();
+        givenCarLookupSucceeds(carId, "tid-300");
+        givenTrackLookupSucceeds("tid-300", (long) Integer.MAX_VALUE, (long) Integer.MAX_VALUE);
+        when(finalizationPriceClient.calculatePrice(Integer.MAX_VALUE, Integer.MAX_VALUE, "110000", "1"))
+                .thenReturn(ResponseResult.success(0.00));
+
+        ResponseResult result = orderInfoService.passengerGetoff(orderRequest);
+
+        assertEquals(CommonStatus.SUCCESS.getCode(), result.getCode());
+        verify(finalizationPriceClient, times(1))
+                .calculatePrice(Integer.MAX_VALUE, Integer.MAX_VALUE, "110000", "1");
+        UpdateWrapper<OrderInfo> successUpdate = captureTerminalFinalizationUpdate();
+        assertWrapperContainsValue(successUpdate, (long) Integer.MAX_VALUE);
+        assertWrapperContainsValue(successUpdate, 0.00);
     }
 
     @Test
@@ -740,6 +1106,7 @@ class OrderInfoServiceTest {
         verify(orderInfoMapper, never()).updateById(any(OrderInfo.class));
         UpdateWrapper<OrderInfo> failedUpdate = captureTerminalFinalizationUpdate();
         assertTerminalCas(failedUpdate, 3);
+        assertFinalizationWrapperPreservesCreationTime(failedUpdate);
         assertSqlSetContains(failedUpdate, "order_status");
         assertSqlSetContains(failedUpdate, "finalization_next_retry_at");
         assertSqlSetContains(failedUpdate, "finalization_last_error");
@@ -766,6 +1133,7 @@ class OrderInfoServiceTest {
         verifyNoInteractions(finalizationDriverUserClient, finalizationMapClient, finalizationPriceClient);
         UpdateWrapper<OrderInfo> failedUpdate = captureFinalizationUpdates(1).get(0);
         assertTerminalCas(failedUpdate, 3);
+        assertFinalizationWrapperPreservesCreationTime(failedUpdate);
         assertNullRetryTimeDuePredicate(failedUpdate.getSqlSegment());
         assertSqlSetContains(failedUpdate, "order_status");
         assertSqlSetContains(failedUpdate, "finalization_next_retry_at");
@@ -804,6 +1172,7 @@ class OrderInfoServiceTest {
         assertSqlSetContains(recoveryUpdate, "finalization_next_retry_at");
         assertSqlSetContains(recoveryUpdate, "finalization_last_error");
         assertSqlSetContains(recoveryUpdate, "gmt_modified");
+        assertFinalizationWrapperPreservesCreationTime(recoveryUpdate);
         assertSqlSetDoesNotContain(recoveryUpdate, "finalization_trace_end_epoch_ms");
         assertSqlSetDoesNotContain(recoveryUpdate, "drive_mile");
         assertSqlSetDoesNotContain(recoveryUpdate, "drive_time");
